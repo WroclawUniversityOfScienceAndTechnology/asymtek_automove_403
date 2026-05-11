@@ -36,6 +36,16 @@ class GuiStates(Enum):
     LANGUAGE_STATE = 0x03
 
 
+MACHINE_JOG_EVENTS = (
+    "machine_jog_up",
+    "machine_jog_down",
+    "machine_jog_left",
+    "machine_jog_right",
+    "machine_jog_z_plus",
+    "machine_jog_z_minus",
+)
+
+
 class GuiStatesHandler:
     """
     Part of the controller which handle gui events and update screens
@@ -203,9 +213,11 @@ class GuiStatesHandler:
             task_id = self.machine_dispatcher.start_program(payload)
             self._start_machine_progress_poll(task_id)
         elif event_name in ("step_line", "start_from_line"):
-            self.machine_dispatcher.send_current_command(payload)
-        elif event_name in ("machine_jog_up", "machine_jog_down", "machine_jog_left", "machine_jog_right"):
-            self.machine_dispatcher.jog(payload)
+            task_id = self.machine_dispatcher.send_current_command(payload)
+            self._start_machine_progress_poll(task_id)
+        elif event_name in MACHINE_JOG_EVENTS:
+            task_id = self.machine_dispatcher.jog(payload)
+            self._start_machine_progress_poll(task_id)
 
     def _start_machine_progress_poll(self, task_id):
         self._cancel_machine_progress_poll()
@@ -263,10 +275,7 @@ class GuiStatesHandler:
             "extruder_minus",
             "extruder_plus",
             "machine_init",
-            "machine_jog_up",
-            "machine_jog_down",
-            "machine_jog_left",
-            "machine_jog_right",
+            *MACHINE_JOG_EVENTS,
         ):
             Logger().log_info("Machine UI event: " + event_name)
             self._handle_machine_event(event_name, payload or {})

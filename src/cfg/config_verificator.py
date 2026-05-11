@@ -32,6 +32,8 @@ class ConfigVerificator:
         "language": lambda value: isinstance(value, str) and value == "en",
         "pin": lambda value: isinstance(value, str) and len(value) == 6 and value.isdecimal(),
         "temperature_units": lambda value: isinstance(value, str) and value == "C" or value == "F",
+        "SERIAL_PORT": lambda value: isinstance(value, str) and bool(value.strip()),
+        "BAUD_RATE": lambda value: isinstance(value, int) and not isinstance(value, bool) and value > 0,
     }
 
     section_mappings = {
@@ -48,6 +50,8 @@ class ConfigVerificator:
         "language": "USER",
         "pin": "USER",
         "temperature_units": "USER",
+        "SERIAL_PORT": "USER",
+        "BAUD_RATE": "USER",
     }
 
     @classmethod

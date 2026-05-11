@@ -20,14 +20,14 @@ DEFAULT_MACHINE_SETTINGS = {
     "Z_SAFE_HEIGHT": Z_SAFE_HEIGHT,
     "STEPSXY_PER_MM": STEPSXY_PER_MM,
     "STEPSZ_PER_MM": STEPSZ_PER_MM,
-    "SERIAL_PORT": "COM14",
+    "SERIAL_PORT": "/dev/ttyUSB0",
     "BAUD_RATE": 9600,
 }
 
 
 @dataclass(frozen=True)
 class SerialConfig:
-    port: str = "COM14"
+    port: str = "/dev/ttyUSB0"
     baudrate: int = 9600
     timeout: float = 1.0
     write_timeout: float = 1.0
@@ -263,14 +263,3 @@ def build_jog_command(axis, distance_mm, settings=None):
         z_distance = distance_mm * machine_settings["STEPSZ_PER_MM"]
         return f"RZ {z_distance:.3f};"
     raise ValueError("Unsupported jog axis: {}".format(axis))
-#
-# def main():
-#     """
-#     Configure all crucial components and pass the controller
-#     """
-#     serial = open_serial_connection()
-#     commands = "in; mr1000,1000;"
-#     send_acl_command(serial, commands)
-#
-# if __name__ == "__main__":
-#     main()

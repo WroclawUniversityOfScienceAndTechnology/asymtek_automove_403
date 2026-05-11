@@ -18,9 +18,11 @@ class MachineDispatcherSpy:
 
     def send_current_command(self, payload):
         self.sent_payload = payload
+        return "command-task-1"
 
     def jog(self, payload):
         self.jog_payload = payload
+        return "jog-task-1"
 
 
 def test_machine_event_is_not_dispatched_when_payload_is_simulated():
@@ -44,6 +46,28 @@ def test_machine_event_is_dispatched_when_payload_targets_machine():
 
     assert handler.machine_dispatcher.started_payload == payload
     assert handler._machine_task_id == "task-1"  # pylint: disable=protected-access
+
+
+def test_z_jog_ui_event_is_dispatched_to_machine():
+    handler = GuiStatesHandler(state_machine=None, canvas=None)
+    handler.machine_dispatcher = MachineDispatcherSpy()
+    payload = {"axis": "Z", "distance_mm": 1.0}
+
+    handler._handle_manager_options("machine_jog_z_plus", payload)  # pylint: disable=protected-access
+
+    assert handler.machine_dispatcher.jog_payload == payload
+    assert handler._machine_task_id == "jog-task-1"  # pylint: disable=protected-access
+
+
+def test_single_command_event_starts_progress_polling():
+    handler = GuiStatesHandler(state_machine=None, canvas=None)
+    handler.machine_dispatcher = MachineDispatcherSpy()
+    payload = {"command": "MA 0, 0;"}
+
+    handler._handle_machine_event("step_line", payload)  # pylint: disable=protected-access
+
+    assert handler.machine_dispatcher.sent_payload == payload
+    assert handler._machine_task_id == "command-task-1"  # pylint: disable=protected-access
 
 
 def test_machine_progress_poll_updates_engine_room_page():

@@ -10,6 +10,7 @@ from src.backend.machine_management import (
     list_serial_ports,
     parse_acl_toolpath,
 )
+from src.cfg import Configuration
 from src.gui.tk_framework import Base, tk
 
 
@@ -33,10 +34,12 @@ class EngineRoomPage(Base):
         self.simulation_mode = True
         self.execution_lines = []
         self.machine_progress = {}
+        self.machine_position = {"X": None, "Y": None, "Z": None}
         self._simulation_after_id = None
         self._simulation_interval_ms = 300
         self._embedded_widgets = []
         self._machine_setting_entries = {}
+        self._machine_position_text_items = {}
         self._serial_settings_dialog = None
         self._status_text_item = None
         self._progress_bar_item = None
@@ -77,6 +80,7 @@ class EngineRoomPage(Base):
         self.simulation_mode = kwargs.get("simulation_mode", self.simulation_mode)
         self.execution_lines = kwargs.get("execution_lines", self.execution_lines)
         self.machine_progress = kwargs.get("machine_progress", self.machine_progress)
+        self.machine_position.update(kwargs.get("machine_position", {}))
         self.machine_settings.update(kwargs.get("machine_settings", {}))
         self._normalize_line_positions()
         self._render()
@@ -125,6 +129,7 @@ class EngineRoomPage(Base):
         self._execution_line_list = None
         self._displayed_current_line = None
         self._preview_dynamic_items = []
+        self._machine_position_text_items = {}
 
     def _scaled(self, value):
         return int(round(value * self.scale))
@@ -549,7 +554,7 @@ class EngineRoomPage(Base):
             744,
             72,
             54,
-            "UP",
+            "Y+",
             "machine_jog_up",
             fill="#40536d",
             callback=lambda event: self._jog("Y", 1),
@@ -560,7 +565,7 @@ class EngineRoomPage(Base):
             808,
             72,
             54,
-            "LEFT",
+            "X-",
             "machine_jog_left",
             fill="#40536d",
             callback=lambda event: self._jog("X", -1),
@@ -571,7 +576,7 @@ class EngineRoomPage(Base):
             808,
             72,
             54,
-            "DOWN",
+            "Y-",
             "machine_jog_down",
             fill="#40536d",
             callback=lambda event: self._jog("Y", -1),
@@ -582,12 +587,51 @@ class EngineRoomPage(Base):
             808,
             72,
             54,
-            "RIGHT",
+            "X+",
             "machine_jog_right",
             fill="#40536d",
             callback=lambda event: self._jog("X", 1),
             emit_on_none=False,
         )
+        self._button(
+            1222,
+            744,
+            72,
+            54,
+            "Z+",
+            "machine_jog_z_plus",
+            fill="#40536d",
+            callback=lambda event: self._jog("Z", 1),
+            emit_on_none=False,
+        )
+        self._button(
+            1222,
+            808,
+            72,
+            54,
+            "Z-",
+            "machine_jog_z_minus",
+            fill="#40536d",
+            callback=lambda event: self._jog("Z", -1),
+            emit_on_none=False,
+        )
+        self._add_machine_position_row()
+
+    def _add_machine_position_row(self):
+        y = 924
+        self._text(436, y + 8, "Current position", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
+        for idx, axis in enumerate(("X", "Y", "Z")):
+            x = 620 + idx * 154
+            self._text(x, y + 8, axis, fill="#172033", font=(self.default_font or "Helvetica", 13, "bold"))
+            self._rect(x + 28, y, x + 120, y + 32, fill="#eef3fa", outline="#d8e1ef")
+            self._machine_position_text_items[axis] = self._text(
+                x + 74,
+                y + 17,
+                self._format_position_value(axis),
+                fill="#172033",
+                font=(self.default_font or "Helvetica", 13, "bold"),
+                anchor=tk.CENTER,
+            )
 
     def _entry(self, key, x, y, width, height):
         value = self.machine_settings.get(key, 0)
@@ -703,6 +747,11 @@ class EngineRoomPage(Base):
             settings["SERIAL_PORT"] = port
             settings["BAUD_RATE"] = baud_rate
             self.machine_settings = settings
+            try:
+                self._store_serial_settings(port, baud_rate)
+            except RuntimeError as exc:
+                messagebox.showerror("Serial Settings", str(exc), parent=dialog)
+                return
             close_dialog()
             self.machine_status = "Serial set"
             self._render()
@@ -719,6 +768,10 @@ class EngineRoomPage(Base):
         y = parent.winfo_rooty() + max((parent.winfo_height() - dialog.winfo_height()) // 2, 0)
         dialog.geometry("+{}+{}".format(x, y))
         port_combo.focus_set()
+
+    def _store_serial_settings(self, port, baud_rate):
+        Configuration.set("SERIAL_PORT", port, section="USER")
+        Configuration.set("BAUD_RATE", baud_rate, section="USER")
 
     def _add_execution_panel(self):
         self._panel(1352, 112, 544, 920, "Upcoming Execution")
@@ -945,6 +998,7 @@ class EngineRoomPage(Base):
                 self._scaled(960),
             )
             self.canvas.itemconfig(self._progress_text_item, text=str(self.progress_percent) + "%")
+            self._refresh_machine_position_fields()
             self.canvas.itemconfig(
                 self._selected_line_text_item,
                 text="Selected line: {} / {}".format(selected_line, total_lines),
@@ -959,10 +1013,26 @@ class EngineRoomPage(Base):
         except tk.TclError:
             self._render()
 
+    def _refresh_machine_position_fields(self):
+        if set(self._machine_position_text_items.keys()) != {"X", "Y", "Z"}:
+            self._render()
+            return
+        for axis, text_item in self._machine_position_text_items.items():
+            self.canvas.itemconfig(text_item, text=self._format_position_value(axis))
+
     def _format_setting_value(self, value):
         if isinstance(value, float) and value.is_integer():
             return str(int(value))
         return str(value)
+
+    def _format_position_value(self, axis):
+        value = self.machine_position.get(axis)
+        if value is None:
+            return "--"
+        try:
+            return "{:.3f}".format(float(value))
+        except (TypeError, ValueError):
+            return str(value)
 
     def _machine_progress_summary(self):
         if not self.machine_progress:
@@ -997,6 +1067,23 @@ class EngineRoomPage(Base):
                 return None
         self.machine_settings = updated_settings
         return updated_settings.copy()
+
+    def _apply_machine_position(self, progress):
+        position = progress.get("position", progress.get("machine_position"))
+        if not isinstance(position, dict):
+            return
+
+        for axis in ("X", "Y", "Z"):
+            found, value = self._position_axis_value(position, axis)
+            if found:
+                self.machine_position[axis] = value
+
+    @staticmethod
+    def _position_axis_value(position, axis):
+        for key in (axis, axis.lower(), axis + "_MM", axis.lower() + "_mm"):
+            if key in position:
+                return True, position[key]
+        return False, None
 
     def _machine_init(self, event):
         settings = self._read_machine_settings()
@@ -1054,6 +1141,7 @@ class EngineRoomPage(Base):
 
     def apply_machine_progress(self, progress):
         self.machine_progress = progress or {}
+        self._apply_machine_position(self.machine_progress)
         line_index = self.machine_progress.get("line_index", self.machine_progress.get("last_line_index"))
         if line_index is not None:
             try:

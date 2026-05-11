@@ -14,6 +14,7 @@ def _page_shell():
     page._serial_settings_dialog = None
     page._simulation_after_id = None
     page.machine_progress = {}
+    page.machine_position = {"X": None, "Y": None, "Z": None}
     EngineRoomPage._clear_dynamic_render_refs(page)  # pylint: disable=protected-access
     return page
 
@@ -98,3 +99,122 @@ def test_simulation_tick_refreshes_existing_widgets_without_full_render():
     assert page.progress_percent == 50
     assert refreshed == [1]
     assert scheduled == [True]
+
+
+def test_process_setup_panel_adds_z_jog_buttons():
+    page = _page_shell()
+    page.default_font = ""
+    page.machine_setting_fields = []
+    page.machine_settings = {"jog_distance_mm": 1.0}
+    page._machine_setting_entries = {}  # pylint: disable=protected-access
+    buttons = []
+
+    page._panel = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._text = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._rect = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._entry = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._jog = lambda axis, direction: {"axis": axis, "direction": direction}  # pylint: disable=protected-access
+
+    def record_button(x, y, width, height, text, event_name, **kwargs):
+        buttons.append(
+            {
+                "text": text,
+                "event_name": event_name,
+                "callback": kwargs["callback"],
+            }
+        )
+
+    page._button = record_button  # pylint: disable=protected-access
+
+    EngineRoomPage._add_process_setup_panel(page)  # pylint: disable=protected-access
+
+    z_plus = next(button for button in buttons if button["event_name"] == "machine_jog_z_plus")
+    z_minus = next(button for button in buttons if button["event_name"] == "machine_jog_z_minus")
+    assert z_plus["text"] == "Z+"
+    assert z_plus["callback"](None) == {"axis": "Z", "direction": 1}
+    assert z_minus["text"] == "Z-"
+    assert z_minus["callback"](None) == {"axis": "Z", "direction": -1}
+
+
+def test_z_jog_payload_uses_configured_distance():
+    page = _page_shell()
+    page.simulation_mode = True
+    page.machine_status = "Ready"
+    page.machine_settings = {"jog_distance_mm": 1.25}
+    page._machine_setting_entries = {}  # pylint: disable=protected-access
+    page._render = lambda: None  # pylint: disable=protected-access
+
+    payload = EngineRoomPage._jog(page, "Z", -1)  # pylint: disable=protected-access
+
+    assert payload == {
+        "axis": "Z",
+        "distance_mm": -1.25,
+        "settings": {"jog_distance_mm": 1.25},
+        "simulation_mode": True,
+    }
+
+
+def test_process_setup_panel_adds_machine_position_row():
+    page = _page_shell()
+    page.default_font = ""
+    page.machine_setting_fields = []
+    page.machine_settings = {"jog_distance_mm": 1.0}
+    page.machine_position = {"X": 1.2345, "Y": -2, "Z": None}
+    page._machine_setting_entries = {}  # pylint: disable=protected-access
+    text_values = []
+
+    def record_text(x, y, text, **kwargs):
+        text_values.append(text)
+        return "text-{}".format(len(text_values))
+
+    page._panel = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._text = record_text  # pylint: disable=protected-access
+    page._rect = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._entry = lambda *args, **kwargs: None  # pylint: disable=protected-access
+    page._button = lambda *args, **kwargs: None  # pylint: disable=protected-access
+
+    EngineRoomPage._add_process_setup_panel(page)  # pylint: disable=protected-access
+
+    assert "Current position" in text_values
+    assert "1.234" in text_values
+    assert "-2.000" in text_values
+    assert "--" in text_values
+
+
+def test_apply_machine_progress_updates_machine_position_from_json():
+    page = _page_shell()
+    page.execution_lines = []
+    page.current_line = 0
+    page.selected_line = 0
+    page.progress_percent = 0
+    page.machine_status = "Running"
+    refreshed = []
+    page._refresh_execution_progress = lambda: refreshed.append(True)  # pylint: disable=protected-access
+
+    page.apply_machine_progress(
+        {
+            "state": "PROGRESS",
+            "status": "sending",
+            "position": {"x": 10.125, "y": -3.5, "z": 0.25},
+        }
+    )
+
+    assert page.machine_position == {"X": 10.125, "Y": -3.5, "Z": 0.25}
+    assert refreshed == [True]
+
+
+def test_store_serial_settings_persists_user_config(monkeypatch):
+    saved_values = []
+    page = _page_shell()
+
+    monkeypatch.setattr(
+        "src.gui.view.engine_room_page.Configuration.set",
+        staticmethod(lambda key, value, section="USER": saved_values.append((key, value, section))),
+    )
+
+    EngineRoomPage._store_serial_settings(page, "COM9", 57600)  # pylint: disable=protected-access
+
+    assert saved_values == [
+        ("SERIAL_PORT", "COM9", "USER"),
+        ("BAUD_RATE", 57600, "USER"),
+    ]

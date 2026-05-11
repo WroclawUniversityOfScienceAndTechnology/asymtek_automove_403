@@ -2,6 +2,7 @@
 
 # pylint: disable=C0114
 from src.business_logic.models.manager_model_base import ManagerModelBase
+from src.cfg import Configuration
 
 
 class EngineRoomModel(ManagerModelBase):
@@ -23,6 +24,7 @@ class EngineRoomModel(ManagerModelBase):
         "SERIAL_PORT": "/dev/ttyUSB0",
         "BAUD_RATE": 9600,
     }
+    SERIAL_CONFIG_KEYS = ("SERIAL_PORT", "BAUD_RATE")
 
     @classmethod
     def get_model_data(cls):
@@ -40,11 +42,21 @@ class EngineRoomModel(ManagerModelBase):
             "extruder_percent": 100,
             "progress_percent": 0,
             "simulation_mode": False,
-            "machine_settings": cls.DEFAULT_MACHINE_SETTINGS.copy(),
+            "machine_settings": cls.get_machine_settings(),
             "execution_lines": [],
             "language": cls.get_language(),
         }
         return _dict
+
+    @classmethod
+    def get_machine_settings(cls):
+        settings = cls.DEFAULT_MACHINE_SETTINGS.copy()
+        for key in cls.SERIAL_CONFIG_KEYS:
+            try:
+                settings[key] = Configuration.get(key, section="USER")
+            except RuntimeError:
+                pass
+        return settings
 
     @classmethod
     def _get_execution_lines(cls):

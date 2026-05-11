@@ -22,6 +22,8 @@ def test_get_keys():
         "language",
         "pin",
         "temperature_units",
+        "SERIAL_PORT",
+        "BAUD_RATE",
     ]
 
 
@@ -68,12 +70,12 @@ def test_verify_int_keys_wrong_type():
 
 
 def test_verify_str_keys():
-    for key in ["program_name", "log_file_path"]:
+    for key in ["program_name", "log_file_path", "SERIAL_PORT"]:
         assert ConfigVerificator.verify(key, "test")
 
 
 def test_verify_str_keys_wrong_type():
-    for key in ["program_name", "log_file_path"]:
+    for key in ["program_name", "log_file_path", "SERIAL_PORT"]:
         assert ConfigVerificator.verify(key, False) == False
         assert ConfigVerificator.verify(key, 13) == False
         assert ConfigVerificator.verify(key, 1.25) == False
@@ -89,6 +91,16 @@ def test_verify_log_levels_not_in_range():
     for key in ["file_log_level", "console_log_level"]:
         for value in [-1, 1, 11, 51]:
             assert ConfigVerificator.verify(key, value) == False
+
+
+def test_verify_baud_rate():
+    assert ConfigVerificator.verify("BAUD_RATE", 9600)
+    assert ConfigVerificator.verify("BAUD_RATE", 115200)
+
+
+def test_verify_baud_rate_wrong_type():
+    for value in [False, "9600", 0, -9600, 9600.0]:
+        assert ConfigVerificator.verify("BAUD_RATE", value) == False
 
 
 def test_verify_language():
@@ -127,5 +139,5 @@ def test_get_section():
         "console_log_level",
     ]:
         assert ConfigVerificator.get_section(key) == "GENERAL"
-    for key in ["language", "pin", "temperature_units"]:
+    for key in ["language", "pin", "temperature_units", "SERIAL_PORT", "BAUD_RATE"]:
         assert ConfigVerificator.get_section(key) == "USER"

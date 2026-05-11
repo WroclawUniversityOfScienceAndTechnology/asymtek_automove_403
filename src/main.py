@@ -11,7 +11,6 @@ def main():
     """
     Configure all crucial components and pass the controller
     """
-    Configuration.reset_settings()
     Configuration.update_settings()
     Configuration.check_config()
     Configuration.install_language(Configuration.get("language", section="USER"))

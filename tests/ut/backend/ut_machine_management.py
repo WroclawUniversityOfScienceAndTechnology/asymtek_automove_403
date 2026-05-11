@@ -78,6 +78,12 @@ def test_build_jog_command_uses_xy_steps():
     assert command == "MR -250.000, 0;"
 
 
+def test_build_jog_command_uses_z_steps():
+    command = build_jog_command("Z", 1.25, settings={"STEPSZ_PER_MM": 80})
+
+    assert command == "RZ 100.000;"
+
+
 def test_serial_preflight_reports_missing_posix_port():
     error = get_serial_preflight_error({"SERIAL_PORT": "/dev/asymtek-missing-test-port"})
 
