@@ -17,3 +17,4 @@ def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
 
     assert data["machine_settings"]["SERIAL_PORT"] == "COM7"
     assert data["machine_settings"]["BAUD_RATE"] == 115200
+    assert data["machine_settings"]["PROGRAM_STEP_DELAY_SEC"] == 0.25

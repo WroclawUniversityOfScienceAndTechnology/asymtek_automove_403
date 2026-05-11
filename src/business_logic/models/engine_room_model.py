@@ -23,6 +23,7 @@ class EngineRoomModel(ManagerModelBase):
         "jog_distance_mm": 1.0,
         "SERIAL_PORT": "/dev/ttyUSB0",
         "BAUD_RATE": 9600,
+        "PROGRAM_STEP_DELAY_SEC": 0.25,
     }
     SERIAL_CONFIG_KEYS = ("SERIAL_PORT", "BAUD_RATE")
 

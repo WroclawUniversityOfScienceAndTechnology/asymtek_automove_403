@@ -210,11 +210,24 @@ class GuiStatesHandler:
             Logger().log_info("Machine dispatch skipped for simulation event: " + event_name)
             return None
         if event_name == "start_process":
+            if self._machine_task_id:
+                self.machine_dispatcher.resume_program(self._machine_task_id)
+                self._ensure_machine_progress_poll()
+            else:
+                task_id = self.machine_dispatcher.start_program(payload)
+                self._start_machine_progress_poll(task_id)
+        elif event_name == "start_from_line":
             task_id = self.machine_dispatcher.start_program(payload)
             self._start_machine_progress_poll(task_id)
-        elif event_name in ("step_line", "start_from_line"):
+        elif event_name == "step_line":
             task_id = self.machine_dispatcher.send_current_command(payload)
             self._start_machine_progress_poll(task_id)
+        elif event_name == "pause_process":
+            self.machine_dispatcher.pause_program(self._machine_task_id)
+            self._ensure_machine_progress_poll()
+        elif event_name == "stop_process":
+            self.machine_dispatcher.stop_program(self._machine_task_id)
+            self._ensure_machine_progress_poll()
         elif event_name in MACHINE_JOG_EVENTS:
             task_id = self.machine_dispatcher.jog(payload)
             self._start_machine_progress_poll(task_id)
@@ -223,6 +236,10 @@ class GuiStatesHandler:
         self._cancel_machine_progress_poll()
         self._machine_task_id = task_id
         if task_id:
+            self._schedule_machine_progress_poll()
+
+    def _ensure_machine_progress_poll(self):
+        if self._machine_task_id and self._machine_progress_after_id is None:
             self._schedule_machine_progress_poll()
 
     def _schedule_machine_progress_poll(self):

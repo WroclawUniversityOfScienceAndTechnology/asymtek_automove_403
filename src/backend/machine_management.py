@@ -1,6 +1,7 @@
 import math
 import os
 import re
+import time
 from dataclasses import dataclass
 
 
@@ -12,6 +13,7 @@ Z_OFFSET_PER_SEC = 0.2  # [mm/sekunde] Wysokosc igly nad plytka na 1 s podawania
 Z_SAFE_HEIGHT = 100.0  # [mm] Wysokosc bezpieczna przelotu igly
 STEPSXY_PER_MM = 100  # [kroki/mm] Ilosc krokow na mm XY
 STEPSZ_PER_MM = 100  # [kroki/mm] Ilosc krokow na mm Z
+PROGRAM_STEP_DELAY_SEC = 0.25  # [sekundy] Host-side pause between ACL program lines
 
 
 DEFAULT_MACHINE_SETTINGS = {
@@ -22,6 +24,8 @@ DEFAULT_MACHINE_SETTINGS = {
     "STEPSZ_PER_MM": STEPSZ_PER_MM,
     "SERIAL_PORT": "/dev/ttyUSB0",
     "BAUD_RATE": 9600,
+    "COMMAND_TIMEOUT_SEC": 30.0,
+    "PROGRAM_STEP_DELAY_SEC": PROGRAM_STEP_DELAY_SEC,
 }
 
 
@@ -45,10 +49,19 @@ class ToolpathPoint:
     dispensing: bool = False
 
 
+class AclMachineError(RuntimeError):
+    """Raised when the ACL controller reports an error or misses a response."""
+
+
 _XY_MOVE_RE = re.compile(
     r"^(M[AR])\s+"
     r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*,\s*"
     r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
+)
+_WA_RE = re.compile(
+    r"^WA\s+"
+    r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*;$",
+    re.IGNORECASE,
 )
 
 
@@ -74,7 +87,15 @@ def get_aperture_area(aperture):
 def normalize_machine_settings(settings=None):
     normalized_settings = DEFAULT_MACHINE_SETTINGS.copy()
     if settings:
-        for key in ("TIME_PER_SQMM", "Z_OFFSET_PER_SEC", "Z_SAFE_HEIGHT", "STEPSXY_PER_MM", "STEPSZ_PER_MM"):
+        for key in (
+            "TIME_PER_SQMM",
+            "Z_OFFSET_PER_SEC",
+            "Z_SAFE_HEIGHT",
+            "STEPSXY_PER_MM",
+            "STEPSZ_PER_MM",
+            "COMMAND_TIMEOUT_SEC",
+            "PROGRAM_STEP_DELAY_SEC",
+        ):
             if key in settings:
                 normalized_settings[key] = float(settings[key])
         if "SERIAL_PORT" in settings:
@@ -89,6 +110,7 @@ def build_serial_config(settings=None):
     return SerialConfig(
         port=machine_settings["SERIAL_PORT"],
         baudrate=machine_settings["BAUD_RATE"],
+        timeout=machine_settings["COMMAND_TIMEOUT_SEC"],
     )
 
 
@@ -209,7 +231,7 @@ def open_serial_connection(settings=None):
     - 7 data bits
     - RTS/CTS hardware flow control
     - 2 stop bits
-    - odd parity
+    - even parity
     """
     import serial
 
@@ -218,7 +240,7 @@ def open_serial_connection(settings=None):
         port=config.port,
         baudrate=config.baudrate,
         bytesize=serial.SEVENBITS,
-        parity=serial.PARITY_EVEN,
+        parity=config.parity,
         stopbits=serial.STOPBITS_TWO,
         rtscts=config.rtscts,
         timeout=config.timeout,
@@ -235,19 +257,146 @@ def get_serial_preflight_error(settings=None):
     return None
 
 
-def send_acl_program(commands, settings=None, start_index=0, progress_callback=None):
+def split_acl_commands(command):
+    """Split an ACL text line into semicolon-terminated commands."""
+    return [statement.strip() + ";" for statement in command.split(";") if statement.strip()]
+
+
+def get_acl_command_delay(command, settings=None):
+    """Return the host-side delay to apply after sending one ACL program line."""
+    machine_settings = normalize_machine_settings(settings)
+    delay_sec = max(machine_settings["PROGRAM_STEP_DELAY_SEC"], 0.0)
+    for acl_command in split_acl_commands(command):
+        wait_match = _WA_RE.match(acl_command)
+        if wait_match:
+            delay_sec += max(float(wait_match.group(1)), 0.0)
+    return delay_sec
+
+
+def read_acl_response(serial_connection, timeout=None):
+    """Read one ACL output response terminated by the controller output terminator."""
+    previous_timeout = getattr(serial_connection, "timeout", None)
+    if timeout is not None and hasattr(serial_connection, "timeout"):
+        serial_connection.timeout = timeout
+    try:
+        raw_response = serial_connection.readline()
+    finally:
+        if timeout is not None and hasattr(serial_connection, "timeout"):
+            serial_connection.timeout = previous_timeout
+
+    if not raw_response:
+        raise AclMachineError("Timed out waiting for ACL response")
+    response = raw_response.decode("ascii", errors="replace").strip()
+    if response.startswith("?"):
+        raise AclMachineError("ACL exceptional condition: {}".format(response))
+    return response
+
+
+def _parse_acl_numbers(response, expected_count):
+    parts = [part.strip() for part in response.split(",")]
+    if len(parts) != expected_count:
+        raise AclMachineError("Unexpected ACL response: {}".format(response))
+    try:
+        return [float(part) for part in parts]
+    except ValueError as exc:
+        raise AclMachineError("Invalid ACL numeric response: {}".format(response)) from exc
+
+
+def query_machine_position(serial_connection, settings=None):
+    """
+    Query current machine position through ACL output commands.
+
+    Per the ACL manual, OA outputs actual XY position and waits until prior
+    physical action finishes. OZ outputs the Z counter. Both values are reported
+    by the machine in motor counts, so this returns millimeters for the UI.
+    """
+    machine_settings = normalize_machine_settings(settings)
+    timeout = machine_settings["COMMAND_TIMEOUT_SEC"]
+
+    send_acl_command(serial_connection, "OA;")
+    x_steps, y_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 2)
+    send_acl_command(serial_connection, "OZ;")
+    z_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 1)[0]
+
+    return {
+        "x": x_steps / machine_settings["STEPSXY_PER_MM"],
+        "y": y_steps / machine_settings["STEPSXY_PER_MM"],
+        "z": z_steps / machine_settings["STEPSZ_PER_MM"],
+    }
+
+
+def send_acl_command_and_wait(serial_connection, command, settings=None):
+    """
+    Send one ACL command, wait until it is physically complete, and return position.
+
+    ACL has an input buffer, so a host cannot assume that a write has completed
+    the move. A following OA/OZ output request provides the completion barrier.
+    """
+    send_acl_command(serial_connection, command)
+    return query_machine_position(serial_connection, settings=settings)
+
+
+def send_acl_line_and_wait(serial_connection, command, settings=None):
+    """Send every ACL statement in a line, waiting and sampling after each."""
+    position = None
+    for acl_command in split_acl_commands(command):
+        position = send_acl_command_and_wait(serial_connection, acl_command, settings=settings)
+    return position
+
+
+def _program_control_requests_stop(control_callback, line_index, command, sent_count):
+    if control_callback is None:
+        return False
+    return control_callback(line_index, command, sent_count) == "stop"
+
+
+def _sleep_after_acl_command(delay_sec, sleep_func, control_callback, line_index, command, sent_count):
+    remaining_sec = delay_sec
+    while remaining_sec > 0:
+        if _program_control_requests_stop(control_callback, line_index, command, sent_count):
+            return True
+        sleep_step_sec = min(0.1, remaining_sec)
+        sleep_func(sleep_step_sec)
+        remaining_sec -= sleep_step_sec
+    return False
+
+
+def send_acl_program(
+    commands,
+    settings=None,
+    start_index=0,
+    progress_callback=None,
+    control_callback=None,
+    sleep_func=time.sleep,
+):
     """
     Send ACL commands to the machine from start_index to the end.
 
     This function is designed to run in a Celery worker, not in the Tk thread.
+    control_callback may return "stop" to end the program before the next write.
     """
     sent_commands = []
+    machine_settings = normalize_machine_settings(settings)
+    last_line_index = len(commands) - 1
     with open_serial_connection(settings=settings) as serial_connection:
         for line_index, command in enumerate(commands[start_index:], start=start_index):
+            if _program_control_requests_stop(control_callback, line_index, command, len(sent_commands)):
+                break
             send_acl_command(serial_connection, command)
             sent_commands.append({"line_index": line_index, "command": command})
             if progress_callback is not None:
                 progress_callback(line_index, command, len(sent_commands))
+            if line_index < last_line_index:
+                delay_sec = get_acl_command_delay(command, settings=machine_settings)
+                if _sleep_after_acl_command(
+                    delay_sec,
+                    sleep_func,
+                    control_callback,
+                    line_index,
+                    command,
+                    len(sent_commands),
+                ):
+                    break
     return sent_commands
 
 

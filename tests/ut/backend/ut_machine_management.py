@@ -7,10 +7,13 @@ from src.backend.machine_management import (
     build_jog_command,
     build_serial_config,
     generate_acl_from_layer,
+    get_acl_command_delay,
     get_serial_preflight_error,
     get_aperture_area,
     list_serial_ports,
     parse_acl_toolpath,
+    query_machine_position,
+    send_acl_line_and_wait,
     send_acl_program,
 )
 
@@ -67,7 +70,7 @@ def test_build_serial_config_uses_asymtek_acl_framing():
     assert config.port == "/dev/ttyS1"
     assert config.baudrate == 4800
     assert config.bytesize == 7
-    assert config.parity == "O"
+    assert config.parity == "E"
     assert config.stopbits == 2
     assert config.rtscts is True
 
@@ -123,6 +126,7 @@ def test_send_acl_program_reports_progress_for_each_sent_command(monkeypatch):
 
     sent_commands = send_acl_program(
         ["CMD0", "CMD1", "CMD2"],
+        settings={"PROGRAM_STEP_DELAY_SEC": 0},
         start_index=1,
         progress_callback=lambda line_index, command, sent_count: progress.append(
             {
@@ -142,6 +146,131 @@ def test_send_acl_program_reports_progress_for_each_sent_command(monkeypatch):
         {"line_index": 1, "command": "CMD1", "sent_count": 1},
         {"line_index": 2, "command": "CMD2", "sent_count": 2},
     ]
+
+
+def test_acl_command_delay_includes_host_delay_and_acl_wait_time():
+    delay = get_acl_command_delay("CD2; WA 1.500;", settings={"PROGRAM_STEP_DELAY_SEC": 0.25})
+
+    assert delay == pytest.approx(1.75)
+
+
+def test_send_acl_program_paces_between_commands(monkeypatch):
+    class SerialSpy:
+        def __init__(self):
+            self.writes = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def write(self, data):
+            self.writes.append(data)
+
+    serial_connection = SerialSpy()
+    sleeps = []
+    monkeypatch.setattr(
+        "src.backend.machine_management.open_serial_connection",
+        lambda settings=None: serial_connection,
+    )
+
+    sent_commands = send_acl_program(
+        ["CMD0", "CMD1"],
+        settings={"PROGRAM_STEP_DELAY_SEC": 0.25},
+        sleep_func=sleeps.append,
+    )
+
+    assert serial_connection.writes == [b"CMD0\r\n", b"CMD1\r\n"]
+    assert sent_commands == [{"line_index": 0, "command": "CMD0"}, {"line_index": 1, "command": "CMD1"}]
+    assert sleeps == pytest.approx([0.1, 0.1, 0.05])
+
+
+def test_send_acl_program_stops_before_buffering_more_commands(monkeypatch):
+    class SerialSpy:
+        def __init__(self):
+            self.writes = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def write(self, data):
+            self.writes.append(data)
+
+    serial_connection = SerialSpy()
+    monkeypatch.setattr(
+        "src.backend.machine_management.open_serial_connection",
+        lambda settings=None: serial_connection,
+    )
+
+    sent_commands = send_acl_program(
+        ["CMD0", "CMD1"],
+        settings={"PROGRAM_STEP_DELAY_SEC": 0.25},
+        control_callback=lambda line_index, command, sent_count: "stop" if sent_count else "run",
+        sleep_func=lambda delay: None,
+    )
+
+    assert serial_connection.writes == [b"CMD0\r\n"]
+    assert sent_commands == [{"line_index": 0, "command": "CMD0"}]
+
+
+def test_query_machine_position_reads_actual_xy_and_z_as_mm():
+    class SerialSpy:
+        def __init__(self):
+            self.writes = []
+            self.responses = [b"250,500\r\n", b"125\r\n"]
+            self.timeout = 1
+
+        def write(self, data):
+            self.writes.append(data)
+
+        def readline(self):
+            return self.responses.pop(0)
+
+    serial_connection = SerialSpy()
+
+    position = query_machine_position(
+        serial_connection,
+        settings={"STEPSXY_PER_MM": 100, "STEPSZ_PER_MM": 25},
+    )
+
+    assert serial_connection.writes == [b"OA;\r\n", b"OZ;\r\n"]
+    assert position == {"x": 2.5, "y": 5.0, "z": 5.0}
+
+
+def test_send_acl_line_and_wait_splits_multiple_acl_statements():
+    class SerialSpy:
+        def __init__(self):
+            self.writes = []
+            self.responses = [b"10,20\r\n", b"30\r\n", b"40,50\r\n", b"60\r\n"]
+            self.timeout = 1
+
+        def write(self, data):
+            self.writes.append(data)
+
+        def readline(self):
+            return self.responses.pop(0)
+
+    serial_connection = SerialSpy()
+
+    position = send_acl_line_and_wait(
+        serial_connection,
+        "MA 10, 20; AZ 60;",
+        settings={"STEPSXY_PER_MM": 10, "STEPSZ_PER_MM": 10},
+    )
+
+    assert serial_connection.writes == [
+        b"MA 10, 20;\r\n",
+        b"OA;\r\n",
+        b"OZ;\r\n",
+        b"AZ 60;\r\n",
+        b"OA;\r\n",
+        b"OZ;\r\n",
+    ]
+    assert position == {"x": 4.0, "y": 5.0, "z": 6.0}
 
 
 def test_parse_acl_toolpath_converts_acl_steps_to_mm_and_marks_dispense_points():

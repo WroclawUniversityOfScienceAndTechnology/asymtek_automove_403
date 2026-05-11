@@ -1,4 +1,5 @@
 from src.logger import Logger
+from src.backend.machine_control import CONTROL_PAUSED, CONTROL_RUNNING, CONTROL_STOPPED, set_machine_control
 
 
 class MachineTaskDispatcher:
@@ -25,6 +26,27 @@ class MachineTaskDispatcher:
         )
         Logger().log_info("Machine program task queued: " + task.id)
         return task.id
+
+    def pause_program(self, task_id):
+        if not task_id:
+            return None
+        set_machine_control(task_id, CONTROL_PAUSED)
+        Logger().log_info("Machine program pause requested: " + task_id)
+        return task_id
+
+    def resume_program(self, task_id):
+        if not task_id:
+            return None
+        set_machine_control(task_id, CONTROL_RUNNING)
+        Logger().log_info("Machine program resume requested: " + task_id)
+        return task_id
+
+    def stop_program(self, task_id):
+        if not task_id:
+            return None
+        set_machine_control(task_id, CONTROL_STOPPED)
+        Logger().log_info("Machine program stop requested: " + task_id)
+        return task_id
 
     def get_task_progress(self, task_id):
         if not task_id:

@@ -13,8 +13,10 @@ def _page_shell():
     page._embedded_widgets = []
     page._serial_settings_dialog = None
     page._simulation_after_id = None
+    page.active_file = "No Gerber loaded"
     page.machine_progress = {}
     page.machine_position = {"X": None, "Y": None, "Z": None}
+    page.machine_settings = {}
     EngineRoomPage._clear_dynamic_render_refs(page)  # pylint: disable=protected-access
     return page
 
@@ -201,6 +203,45 @@ def test_apply_machine_progress_updates_machine_position_from_json():
 
     assert page.machine_position == {"X": 10.125, "Y": -3.5, "Z": 0.25}
     assert refreshed == [True]
+
+
+def test_apply_machine_progress_reflects_paused_and_stopped_status():
+    page = _page_shell()
+    page.execution_lines = ["CMD0", "CMD1", "CMD2"]
+    page.current_line = 0
+    page.selected_line = 0
+    page.progress_percent = 0
+    refreshed = []
+    page._refresh_execution_progress = lambda: refreshed.append(page.machine_status)  # pylint: disable=protected-access
+
+    page.apply_machine_progress({"status": "paused", "line_index": 1, "sent_count": 1, "total_count": 3})
+
+    assert page.current_line == 1
+    assert page.machine_status == "Paused"
+
+    page.apply_machine_progress({"status": "stopped", "done": True, "line_index": 1, "sent_count": 1, "total_count": 3})
+
+    assert page.current_line == 1
+    assert page.machine_status == "Stopped"
+    assert refreshed == ["Paused", "Stopped"]
+
+
+def test_stop_process_keeps_machine_line_until_backend_reports_stop():
+    page = _page_shell()
+    page.simulation_mode = False
+    page.execution_lines = ["CMD0", "CMD1", "CMD2"]
+    page.current_line = 2
+    page.selected_line = 2
+    page.machine_status = "Running"
+    page._cancel_simulation = lambda: None  # pylint: disable=protected-access
+    page._refresh_execution_progress = lambda: None  # pylint: disable=protected-access
+
+    payload = EngineRoomPage._stop_process(page, None)  # pylint: disable=protected-access
+
+    assert page.machine_status == "Stopping"
+    assert page.current_line == 2
+    assert page.selected_line == 2
+    assert payload["line_index"] == 2
 
 
 def test_store_serial_settings_persists_user_config(monkeypatch):

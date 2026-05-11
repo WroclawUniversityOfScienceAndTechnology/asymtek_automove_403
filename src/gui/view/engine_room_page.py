@@ -59,6 +59,7 @@ class EngineRoomPage(Base):
             "jog_distance_mm": 1.0,
             "SERIAL_PORT": "/dev/ttyUSB0",
             "BAUD_RATE": 9600,
+            "PROGRAM_STEP_DELAY_SEC": 0.25,
         }
         self.machine_setting_fields = [
             ("TIME_PER_SQMM", "TIME_PER_SQMM", "s/mm2"),
@@ -712,7 +713,7 @@ class EngineRoomPage(Base):
         )
         baud_combo.grid(row=1, column=1, pady=6, sticky="w")
 
-        ttk.Label(content, text="7 data bits, odd parity, 2 stop bits, RTS/CTS").grid(
+        ttk.Label(content, text="7 data bits, even parity, 2 stop bits, RTS/CTS").grid(
             row=2,
             column=0,
             columnspan=3,
@@ -1156,6 +1157,10 @@ class EngineRoomPage(Base):
         status = self.machine_progress.get("status", "")
         if status == "error" or state == "FAILURE":
             self.machine_status = "Machine error"
+        elif status == "paused":
+            self.machine_status = "Paused"
+        elif status == "stopped":
+            self.machine_status = "Stopped"
         elif self.machine_progress.get("done"):
             self.machine_status = "Complete" if status == "sent" else "Machine done"
         elif line_index is not None:
@@ -1261,10 +1266,13 @@ class EngineRoomPage(Base):
 
     def _stop_process(self, event):
         self._cancel_simulation()
-        self.machine_status = "Stopped"
-        self.progress_percent = 0
-        self.current_line = 0
-        self.selected_line = 0
+        if self.simulation_mode:
+            self.machine_status = "Stopped"
+            self.progress_percent = 0
+            self.current_line = 0
+            self.selected_line = 0
+        else:
+            self.machine_status = "Stopping"
         self._refresh_execution_progress()
         return self._current_command_payload()
 
