@@ -1,0 +1,298 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-05-10 22:55+0200\n"
+"PO-Revision-Date: 2021-05-10 23:02+0200\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: pl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 2.3\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<12 "
+"|| n%100>14) ? 1 : 2);\n"
+
+#: gui/fragments/fragment_left_menu.py:45
+msgid "Engine room"
+msgstr ""
+
+#: gui/fragments/fragment_left_menu.py:53
+msgid "Notifications"
+msgstr "Powiadomienia"
+
+#: gui/fragments/fragment_left_menu.py:61
+msgid "Languages"
+msgstr "Język"
+
+#: gui/fragments/fragment_manager_threatment.py:57
+msgid "MANAGER PANEL"
+msgstr "PANEL STEROWANIA"
+
+#: gui/fragments/fragment_manager_threatment.py:91
+msgid "THREATMENT"
+msgstr "ZABIEG"
+
+#: gui/tk_framework/base_dialogs/dialogs.py:41
+#, fuzzy
+msgid "OK"
+msgstr "OK"
+
+#: gui/tk_framework/base_dialogs/dialogs.py:45
+msgid "Cancel"
+msgstr "Zakończ"
+
+#: gui/view/login_page.py:60
+msgid "LOGIN"
+msgstr ""
+
+#: gui/view/login_page.py:70
+msgid "Welcome back!"
+msgstr "Witaj ponownie!"
+
+#: gui/view/login_page.py:79
+msgid "Enter pin code or use card to unlock device."
+msgstr "Wprowadź pin lub użyj karty żeby odblokować."
+
+#: gui/view/login_page.py:90
+msgid "CRYO CHAMBER ID"
+msgstr ""
+
+#~ msgid "TEST"
+#~ msgstr "mój test"
+
+#, fuzzy
+#~| msgid "Measurement"
+#~ msgid "Measurement_no"
+#~ msgstr "Pomiar"
+
+#~ msgid "Lockin"
+#~ msgstr "Lockin"
+
+#~ msgid "Integration time[us]"
+#~ msgstr ""
+#~ "Czas aktywacji\n"
+#~ "klucza [ms]"
+
+#, fuzzy
+#~| msgid "New_measurement"
+#~ msgid "Open_measurements"
+#~ msgstr "Nowy Pomiar"
+
+#~ msgid "Exit"
+#~ msgstr "Wyłącz"
+
+#~ msgid "Select file"
+#~ msgstr "Wybierz plik"
+
+#~ msgid "Langmuir Probe"
+#~ msgstr "Sonda Langmuira"
+
+#~ msgid "Covitech"
+#~ msgstr "Covitech"
+
+#~ msgid "User"
+#~ msgstr "Użytkownik"
+
+#~ msgid "Save_meas"
+#~ msgstr "Zapisz pomiar"
+
+#~ msgid "Connection_config"
+#~ msgstr "Konfiguracja połączenia"
+
+#~ msgid "Help"
+#~ msgstr "Pomoc"
+
+#~ msgid "About_Us"
+#~ msgstr "O Nas"
+
+#~ msgid "Do_you_rally_want_to_shutdown_the_program"
+#~ msgstr "Czy na pewno chcesz wyłączyć program?"
+
+#~ msgid "New_calibration_file"
+#~ msgstr "Kalibracja dla nowego użytkownika"
+
+#~ msgid "Changing_the_default_serial_port"
+#~ msgstr "Zmiana domyślnego portu serujnego"
+
+#~ msgid "Copyright_Covitech Andrzej Aksenczuk"
+#~ msgstr ""
+#~ "Copyright Covitech Andrzej Aksenczuk\n"
+#~ "Wszystkie prawa zastrzeżone"
+
+#~ msgid "Language_changes_available_with_next_driver_booting"
+#~ msgstr "Wybrany język będzie dostępny przy ponownym uruchomieniu urządzenia"
+
+#~ msgid "Min_voltage[V]"
+#~ msgstr ""
+#~ "Napięcie\n"
+#~ "min [V]"
+
+#~ msgid "Max_voltage[V]"
+#~ msgstr ""
+#~ "Napięcie\n"
+#~ "max [V]"
+
+#~ msgid "Voltage_step[V]"
+#~ msgstr ""
+#~ "Wzrost \n"
+#~ "napięcia [V]"
+
+#~ msgid "Step_repetition"
+#~ msgstr ""
+#~ "Powtórzeń\n"
+#~ "na krok"
+
+#~ msgid "Software_version"
+#~ msgstr "Wersja oprogramowania"
+
+#~ msgid "Start"
+#~ msgstr "Start"
+
+#~ msgid "Stop"
+#~ msgstr "Stop"
+
+#~ msgid "Pause"
+#~ msgstr "Pauza"
+
+#~ msgid "Connect"
+#~ msgstr "Połączenie"
+
+#~ msgid "Covitech Driver"
+#~ msgstr "Covitech Driver"
+
+#~ msgid "Save_user_program"
+#~ msgstr "Zapisz program użytkownika"
+
+#~ msgid "Open_user_program"
+#~ msgstr "Otwórz program użytkownika"
+
+#~ msgid "Remove"
+#~ msgstr "Usuń"
+
+#~ msgid "Order_number"
+#~ msgstr ""
+#~ "Liczba\n"
+#~ "Sekwencji"
+
+#~ msgid "Process_time[s]"
+#~ msgstr ""
+#~ "Czas\n"
+#~ "procesu [s]"
+
+#~ msgid "Frequency[Hz]"
+#~ msgstr ""
+#~ "Częstotliwość\n"
+#~ "[Hz]"
+
+#~ msgid "Key_delay_time[ms]"
+#~ msgstr ""
+#~ "Czas opóźnienia\n"
+#~ "klucza [ms]"
+
+#~ msgid "Key_active_time[ms]"
+#~ msgstr ""
+#~ "Czas aktywacji\n"
+#~ "klucza [ms]"
+
+#~ msgid "Base_active[y/n]"
+#~ msgstr ""
+#~ "Podłoże aktywne\n"
+#~ "[ON/OFF]"
+
+#~ msgid "Add_new_event"
+#~ msgstr ""
+#~ "Dodaj nowe\n"
+#~ "zdarzenie"
+
+#~ msgid "Reference_glucose"
+#~ msgstr "Referancyjna wartość glukozy"
+
+#~ msgid "New_User"
+#~ msgstr "Nowy Uzytkownik"
+
+#~ msgid "driver_type"
+#~ msgstr "Typ Urządzenia"
+
+#~ msgid "GlucoActive"
+#~ msgstr "GlucoActive"
+
+#~ msgid "Current_user"
+#~ msgstr "Bieżacy użytkownik"
+
+#~ msgid "User_settings"
+#~ msgstr "Ustawienia"
+
+#~ msgid "New_User_Calibration"
+#~ msgstr "Nowy pomiar referencyjny"
+
+#~ msgid "Generate_calibration"
+#~ msgstr "Generuj nowy plik kalibracyjny"
+
+#~ msgid "Calibration"
+#~ msgstr "Kalibracja urządzenia"
+
+#~ msgid "Chose_user_or_select_New_User?"
+#~ msgstr "Wybież istniejącego użtkownika lub zaznacz Nowy Użytkownik"
+
+#~ msgid "Do_you_rally_want_to_shutdown_the_driver"
+#~ msgstr "Czy na pewno chcesz wyłączyć urządzenie?"
+
+#~ msgid "Copyright_GlocoActive"
+#~ msgstr ""
+#~ "Copyrights by GlucoActive.\n"
+#~ "Wszystkie prawa zastrzeżone."
+
+#~ msgid "Do_you_want_to_generate_new_calibration_file?"
+#~ msgstr "Generacja nowej kalibracji"
+
+#~ msgid "Calibration_file_created"
+#~ msgstr "Plik kalibracyjny został poprawnie stworzony"
+
+#~ msgid "Calibration_file_fail"
+#~ msgstr "Niepoprawne tworzenie pliku kalibracyjnego"
+
+#~ msgid "Calibration,_file"
+#~ msgstr "Plik kalibracyjny"
+
+#~ msgid "New_reference_file"
+#~ msgstr "Nowy pomiar referencyjny"
+
+#~ msgid "Do_you_want_to_generate_new_reference_file?"
+#~ msgstr "Generacja nowego pomiaru referencyjnego"
+
+#~ msgid "Set_hand_on_station_within"
+#~ msgstr "Połóż rękę na stacji w ciągu"
+
+#~ msgid "is_correct"
+#~ msgstr "poprawny"
+
+#~ msgid "Measurement_value"
+#~ msgstr "Wynik pomiaru"
+
+#~ msgid "is_incorrect"
+#~ msgstr "niepoprawny"
+
+#~ msgid "Please_try_again"
+#~ msgstr "Proszę, spróbuj ponownie"
+
+#~ msgid "Press_button_to_start_measurement"
+#~ msgstr "Naciśnij Start, aby rozpocząć pomiar"
+
+#~ msgid "Cancle"
+#~ msgstr "Zakończ"
+
+#~ msgid "Do_you_want_to_generate_new_resefence_file?"
+#~ msgstr "Tworzenie nowego pliku referencyjnego"
+
+#~ msgid "Calibration_No_1"
+#~ msgstr "Pomiar Kalibracyjny 1"
+
+#~ msgid "Calibration_No_2"
+#~ msgstr "Pomiar Kalibracyjny 2"

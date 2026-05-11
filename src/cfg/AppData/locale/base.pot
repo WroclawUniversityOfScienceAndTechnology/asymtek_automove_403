@@ -1,0 +1,63 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: 2021-05-10 22:55+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 2.3\n"
+"X-Poedit-Basepath: ../../..\n"
+"X-Poedit-SearchPath-0: .\n"
+
+#: gui/fragments/fragment_left_menu.py:45
+msgid "Engine room"
+msgstr ""
+
+#: gui/fragments/fragment_left_menu.py:53
+msgid "Notifications"
+msgstr ""
+
+#: gui/fragments/fragment_left_menu.py:61
+msgid "Languages"
+msgstr ""
+
+#: gui/fragments/fragment_manager_threatment.py:57
+msgid "MANAGER PANEL"
+msgstr ""
+
+#: gui/fragments/fragment_manager_threatment.py:91
+msgid "THREATMENT"
+msgstr ""
+
+#: gui/tk_framework/base_dialogs/dialogs.py:41
+msgid "OK"
+msgstr ""
+
+#: gui/tk_framework/base_dialogs/dialogs.py:45
+msgid "Cancel"
+msgstr ""
+
+#: gui/view/login_page.py:60
+msgid "LOGIN"
+msgstr ""
+
+#: gui/view/login_page.py:70
+msgid "Welcome back!"
+msgstr ""
+
+#: gui/view/login_page.py:79
+msgid "Enter pin code or use card to unlock device."
+msgstr ""
+
+#: gui/view/login_page.py:90
+msgid "CRYO CHAMBER ID"
+msgstr ""

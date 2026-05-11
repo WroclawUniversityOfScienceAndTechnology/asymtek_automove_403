@@ -1,0 +1,82 @@
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+
+[flake8]
+max-line-length = 120
+
+[tool.poetry]
+name = "python-ui"
+version = "0.1.0"
+description = ""
+authors = ["Andrzej <andrzej.aksenczuk@gmail.com>"]
+readme = "readme.md"
+packages = [{ include = "src" }]
+
+[tool.poetry.scripts]
+python-ui = "src.main:main"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+pexpect = "4.8.0"
+pydantic = {version = ">=1.10,<2", extras = ["email"]}
+Flask = ">=3.0,<4.0"
+jsonschema = "3.2.0"
+pillow = ">=10,<13"
+pyserial = "^3.5"
+matplotlib = ">=3.8,<4.0"
+dictionaries = "*"
+python-statemachine = "0.8.0"
+rx = "3.2.0"
+simpleaudio = "1.0.4"
+graphviz = ">=0.20,<1.0"
+gerbonara = "*"
+celery = ">=5.3,<6.0"
+
+[tool.poetry.group.dev.dependencies]
+allure-pytest = ">=2.13,<3.0"
+autopep8 = ">=2.0,<3.0"
+black = "24.10.0"
+coverage = "~7.6.4"
+flake8 = ">=6.1.0"
+flit = "3.8.0"
+gcovr = ">=5.2"
+isort = "5.11.4"
+lizard = "1.17.7"
+mock = "4.0.3"
+mypy = "1.6.1"
+pre-commit = "*"
+pyclean = "3.0.0"
+pycodestyle = ">=2.11,<2.15"
+pyelftools = "*"
+pyfakefs = "5.3.2"
+pyinstaller = "^6.0"
+pylint = "3.0.2"
+pytest = "7.4.3"
+pytest-bdd = ">=7.0,<8.0"
+pytest-cov = "4.1.0"
+pytest-lazy-fixture = "0.6.3"
+pytest-mock = "3.12.0"
+pytest-order = "1.2.0"
+pytest-subprocess = "1.5.0"
+pytest-xdist = "3.5.0"
+rope = "0.19.0"
+types-clang = "0.14.3"
+types-pyOpenSSL = "23.2.0"
+types-PyYAML = "6.0.12.12"
+types-toml = "*"
+unittest-xml-reporting = "*"
+pyopenssl = "23.2.0"
+
+[tool.poetry.group.doc.dependencies]
+recommonmark = "0.7.1"
+Sphinx = ">=5.3,<8.0"
+sphinx-rtd-theme = ">=1.1.1,<2.0"
+sphinxcontrib-plantuml = "0.24.1"

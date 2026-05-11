@@ -1,0 +1,293 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Candy_1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-05-10 22:55+0200\n"
+"PO-Revision-Date: 2021-05-10 22:57+0200\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 2.3\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: gui/fragments/fragment_left_menu.py:45
+msgid "Engine room"
+msgstr ""
+
+#: gui/fragments/fragment_left_menu.py:53
+msgid "Notifications"
+msgstr "Notifications"
+
+#: gui/fragments/fragment_left_menu.py:61
+#, fuzzy
+#| msgid "Language"
+msgid "Languages"
+msgstr "Language"
+
+#: gui/fragments/fragment_manager_threatment.py:57
+msgid "MANAGER PANEL"
+msgstr ""
+
+#: gui/fragments/fragment_manager_threatment.py:91
+msgid "THREATMENT"
+msgstr ""
+
+#: gui/tk_framework/base_dialogs/dialogs.py:41
+msgid "OK"
+msgstr "OK"
+
+#: gui/tk_framework/base_dialogs/dialogs.py:45
+msgid "Cancel"
+msgstr "Cancel"
+
+#: gui/view/login_page.py:60
+msgid "LOGIN"
+msgstr ""
+
+#: gui/view/login_page.py:70
+msgid "Welcome back!"
+msgstr ""
+
+#: gui/view/login_page.py:79
+msgid "Enter pin code or use card to unlock device."
+msgstr ""
+
+#: gui/view/login_page.py:90
+msgid "CRYO CHAMBER ID"
+msgstr ""
+
+#~ msgid "TEST"
+#~ msgstr "my test"
+
+#, fuzzy
+#~| msgid "Measurement"
+#~ msgid "Measurement_no"
+#~ msgstr "Measurement"
+
+#, fuzzy
+#~| msgid "New_measurement"
+#~ msgid "Open_measurements"
+#~ msgstr "New Measurement"
+
+#~ msgid "Exit"
+#~ msgstr "Exit"
+
+#~ msgid "Select file"
+#~ msgstr "Select file"
+
+#~ msgid "Langmuir Probe"
+#~ msgstr "Langmuir Probe"
+
+#~ msgid "Covitech"
+#~ msgstr "Covitech\t"
+
+#~ msgid "User"
+#~ msgstr "User"
+
+#~ msgid "Save_meas"
+#~ msgstr "Save current measurement"
+
+#~ msgid "Connection_config"
+#~ msgstr "Connection configuration"
+
+#~ msgid "Help"
+#~ msgstr "Help"
+
+#~ msgid "About_Us"
+#~ msgstr "About Us"
+
+#~ msgid "Do_you_rally_want_to_shutdown_the_program"
+#~ msgstr "Do you rally want to shutdown the program?"
+
+#, fuzzy
+#~ msgid "New_calibration_file"
+#~ msgstr "New User Calibration"
+
+#~ msgid "Changing_the_default_serial_port"
+#~ msgstr "Changing the default serial port"
+
+#~ msgid "Copyright_Covitech Andrzej Aksenczuk"
+#~ msgstr ""
+#~ "Copyright Covitech Andrzej Aksenczuk\n"
+#~ "All rights reserved"
+
+#~ msgid "Language_changes_available_with_next_driver_booting"
+#~ msgstr "Chosen language will be available with the next driver booting"
+
+#, fuzzy
+#~| msgid "Magnetron_volt[V]"
+#~ msgid "Min_voltage[V]"
+#~ msgstr ""
+#~ "Magnetron Voltage\n"
+#~ "[V]"
+
+#, fuzzy
+#~| msgid "Base_volt[V]"
+#~ msgid "Max_voltage[V]"
+#~ msgstr ""
+#~ "Base Voltage\n"
+#~ "[V]"
+
+#~ msgid "Voltage_step[V]"
+#~ msgstr "Voltage step [V]"
+
+#~ msgid "Step_repetition"
+#~ msgstr "Voltage Step/Repetition"
+
+#~ msgid "Software_version"
+#~ msgstr "Software version"
+
+#~ msgid "Start"
+#~ msgstr "Start"
+
+#~ msgid "Stop"
+#~ msgstr "Stop"
+
+#~ msgid "Pause"
+#~ msgstr "Pause"
+
+#~ msgid "Connect"
+#~ msgstr "Connect"
+
+#~ msgid "Covitech Driver"
+#~ msgstr "Covitech Driver\t"
+
+#~ msgid "Save_user_program"
+#~ msgstr "Save user program"
+
+#~ msgid "Open_user_program"
+#~ msgstr "Load user program"
+
+#~ msgid "ON"
+#~ msgstr "ON"
+
+#~ msgid "OFF"
+#~ msgstr "OFF"
+
+#~ msgid "Remove"
+#~ msgstr "Remove"
+
+#~ msgid "Order_number"
+#~ msgstr ""
+#~ "Order\n"
+#~ "number"
+
+#~ msgid "Process_time[s]"
+#~ msgstr ""
+#~ "Process \n"
+#~ "time[s]"
+
+#~ msgid "Frequency[Hz]"
+#~ msgstr ""
+#~ "Frequency\n"
+#~ "[Hz]"
+
+#~ msgid "Key_delay_time[ms]"
+#~ msgstr ""
+#~ "Key delay\n"
+#~ "time[ms]"
+
+#~ msgid "Key_active_time[ms]"
+#~ msgstr ""
+#~ "Key active\n"
+#~ "time[ms]"
+
+#~ msgid "Base_active[y/n]"
+#~ msgstr ""
+#~ "Base active\n"
+#~ "[ON/OFF]"
+
+#~ msgid "Add_new_event"
+#~ msgstr "Add new event"
+
+#~ msgid "Reference_glucose"
+#~ msgstr "Reference glucose"
+
+#~ msgid "New_User"
+#~ msgstr "New User"
+
+#~ msgid "driver_type"
+#~ msgstr "driver Type"
+
+#~ msgid "GlucoActive"
+#~ msgstr "GlucoActive"
+
+#~ msgid "Current_user"
+#~ msgstr "Currect user"
+
+#~ msgid "User_settings"
+#~ msgstr "User settings"
+
+#~ msgid "New_User_Calibration"
+#~ msgstr "New User Calibration"
+
+#~ msgid "Generate_calibration"
+#~ msgstr "Generate new Calibration file"
+
+#~ msgid "Calibration"
+#~ msgstr "Calibration"
+
+#~ msgid "Chose_user_or_select_New_User?"
+#~ msgstr "Chose user or select the New User?"
+
+#~ msgid "Do_you_rally_want_to_shutdown_the_driver"
+#~ msgstr "Do you rally want to shutdown the driver?"
+
+#~ msgid "Copyright_GlocoActive"
+#~ msgstr "Copyright by GlucoActive. All rights reserved"
+
+#~ msgid "Do_you_want_to_generate_new_calibration_file?"
+#~ msgstr "New calibration file generation"
+
+#~ msgid "Calibration_file_created"
+#~ msgstr "Calibration file had been created"
+
+#~ msgid "Calibration_file_fail"
+#~ msgstr "Calibraion file generation fail"
+
+#~ msgid "Calibration,_file"
+#~ msgstr "Calibration file"
+
+#~ msgid "New_reference_file"
+#~ msgstr "New reference file"
+
+#~ msgid "Do_you_want_to_generate_new_reference_file?"
+#~ msgstr "New reference file generation"
+
+#~ msgid "Set_hand_on_station_within"
+#~ msgstr "Set hand on station within"
+
+#~ msgid "is_correct"
+#~ msgstr "is correct"
+
+#~ msgid "Measurement_value"
+#~ msgstr "Measurement value"
+
+#~ msgid "is_incorrect"
+#~ msgstr "is incorrect"
+
+#~ msgid "Please_try_again"
+#~ msgstr "Please try again"
+
+#~ msgid "Press_button_to_start_measurement"
+#~ msgstr "Press Start button to start the measurement"
+
+#~ msgid "Cancle"
+#~ msgstr "Cancle"
+
+#~ msgid "Do_you_want_to_generate_new_resefence_file?"
+#~ msgstr "New reference file generation"
+
+#~ msgid "Calibration_No_1"
+#~ msgstr "Calibration No 1"
+
+#~ msgid "Calibration_No_2"
+#~ msgstr "Calibration No 2"
