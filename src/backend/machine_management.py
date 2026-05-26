@@ -10,11 +10,10 @@ from dataclasses import dataclass
 # ==========================================
 TIME_PER_SQMM = 1.0  # [sekundy/mm2] Czas wlaczenia zaworu na 1 mm2 powierzchni
 Z_OFFSET_PER_SEC = 0.2  # [mm/sekunde] Wysokosc igly nad plytka na 1 s podawania
-Z_SAFE_HEIGHT = 100.0  # [mm] Wysokosc bezpieczna przelotu igly
-STEPSXY_PER_MM = 100  # [kroki/mm] Ilosc krokow na mm XY
-STEPSZ_PER_MM = 100  # [kroki/mm] Ilosc krokow na mm Z
+Z_SAFE_HEIGHT = 5  # [mm] Wysokosc bezpieczna przelotu igly
+STEPSXY_PER_MM = 39.37  # [kroki/mm] Ilosc krokow na mm XY
+STEPSZ_PER_MM = 10  # [kroki/mm] Ilosc krokow na mm Z
 PROGRAM_STEP_DELAY_SEC = 0.25  # [sekundy] Host-side pause between ACL program lines
-
 
 DEFAULT_MACHINE_SETTINGS = {
     "TIME_PER_SQMM": TIME_PER_SQMM,
@@ -126,10 +125,11 @@ def list_serial_ports():
 
 def generate_acl_from_layer(layer, settings=None):
     """
-    Generate ACL commands from an already loaded Gerber layer.
-
-    The GUI uses this after selecting a Gerber file so generated commands can be
-    shown and stepped through one by one before they are sent to the machine.
+    Generate ACL commands using exclusively relative positioning.
+    Assumes the dispensing head is physically located at the Origin (0,0,0) of the board
+    when the program starts.
+    Z-axis logic is adjusted natively to match the physical motor direction
+    (negative Z values move the head UP, positive Z values move it DOWN).
     """
     machine_settings = normalize_machine_settings(settings)
     time_per_sqmm = machine_settings["TIME_PER_SQMM"]
@@ -138,7 +138,21 @@ def generate_acl_from_layer(layer, settings=None):
     stepsxy_per_mm = machine_settings["STEPSXY_PER_MM"]
     stepsz_per_mm = machine_settings["STEPSZ_PER_MM"]
 
-    commands = [f"MA 0, 0; AZ {z_safe_height:.3f};"]
+    commands = []
+
+    # Virtual starting positions (assuming 0,0,0 on the board)
+    current_x = 0.0
+    current_y = 0.0
+    current_z = 0.0
+
+    # 1. SAFETY: First, raise the needle from 0,0,0 to the safe height
+    # Added '-' because physical Z-axis is inverted (negative goes UP)
+    target_z_safe = -z_safe_height * stepsz_per_mm
+
+    dz_init = target_z_safe - current_z
+    if dz_init != 0:
+        commands.append(f"MZ {dz_init:.3f};")
+        current_z = target_z_safe
 
     for obj in layer.objects:
         if type(obj).__name__ != "Flash":
@@ -148,19 +162,54 @@ def generate_acl_from_layer(layer, settings=None):
         if area <= 0:
             continue
 
-        x = obj.x * stepsxy_per_mm
-        y = obj.y * stepsxy_per_mm
+        # Target positions for the given point from the Gerber file (in steps)
+        target_x = obj.x * stepsxy_per_mm
+        target_y = obj.y * stepsxy_per_mm
         dispense_time_sec = area * time_per_sqmm
-        z_dispense_height = -dispense_time_sec * z_offset_per_sec * stepsz_per_mm
 
-        commands.append(f"MA {x:.3f}, {y:.3f};")
-        commands.append(f"AZ {z_dispense_height:.3f};")
+        # Dispensing height
+        # (Positive value because Z is inverted, so positive moves DOWN towards the board)
+        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm
+
+        # 2. Relative XY move (MR)
+        dx = target_x - current_x
+        dy = target_y - current_y
+
+        if dx != 0 or dy != 0:
+            commands.append(f"MR {dx:.3f}, {dy:.3f};")
+
+        current_x = target_x
+        current_y = target_y
+
+        # 3. Relative Z lower (MZ) to dispensing height
+        dz_down = target_z_dispense - current_z
+        if dz_down != 0:
+            commands.append(f"MZ {dz_down:.3f};")
+
+        current_z = target_z_dispense
+
+        # 4. Dispensing
         commands.append("CD2;")
         commands.append(f"WA {dispense_time_sec:.3f};")
         commands.append("CD0;")
-        commands.append(f"AZ {z_safe_height:.3f};")
 
-    commands.append(f"MA 0, 0; AZ {z_safe_height:.3f};")
+        # 5. Relative Z raise (MZ) to safe height
+        dz_up = target_z_safe - current_z
+        if dz_up != 0:
+            commands.append(f"MZ {dz_up:.3f};")
+
+        current_z = target_z_safe
+
+    # 6. Optional: return to the Origin (0,0) in XY axes after finishing work
+    dx_home = 0.0 - current_x
+    dy_home = 0.0 - current_y
+    if dx_home != 0 or dy_home != 0:
+        commands.append(f"MR {dx_home:.3f}, {dy_home:.3f};")
+
+    # Note: The Z axis is intentionally left at target_z_safe.
+    # We do not lower it back to 0,0,0 so the needle does not hit
+    # the board or freshly applied solder paste after returning to the start point.
+
     return commands
 
 
@@ -410,5 +459,5 @@ def build_jog_command(axis, distance_mm, settings=None):
         return f"MR 0, {y_distance:.3f};"
     if axis == "Z":
         z_distance = distance_mm * machine_settings["STEPSZ_PER_MM"]
-        return f"RZ {z_distance:.3f};"
+        return f"MZ {z_distance:.3f};"
     raise ValueError("Unsupported jog axis: {}".format(axis))
