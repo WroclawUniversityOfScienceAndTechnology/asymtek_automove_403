@@ -15,6 +15,8 @@ from src.backend.machine_management import (
     open_serial_connection,
     send_acl_command,
     send_acl_program,
+    send_acl_command_and_wait,
+    query_machine_position,
 )
 
 
@@ -87,6 +89,13 @@ def send_acl_program_task(self, commands, settings=None, start_index=0):
     finally:
         clear_machine_control(task_id)
 
+    machine_position = None
+    try:
+        with open_serial_connection(settings=settings) as serial_connection:
+            machine_position = query_machine_position(serial_connection, settings=settings)
+    except Exception:
+        pass
+
     last_command = sent_commands[-1] if sent_commands else {"line_index": start_index, "command": None}
     return {
         "event": "program_progress",
@@ -96,6 +105,7 @@ def send_acl_program_task(self, commands, settings=None, start_index=0):
         "line_index": last_command["line_index"],
         "last_line_index": last_command["line_index"],
         "command": last_command["command"],
+        "machine_position": machine_position,
     }
 
 
@@ -104,14 +114,17 @@ def send_acl_command_task(command, settings=None):
     serial_error = get_serial_preflight_error(settings)
     if serial_error:
         return _serial_error_result(serial_error)
+    machine_position = None
     try:
         with open_serial_connection(settings=settings) as serial_connection:
             send_acl_command(serial_connection, command)
+            machine_position = query_machine_position(serial_connection, settings=settings)
     except Exception as exc:  # pylint: disable=W0718
         return _serial_error_result(exc)
     return {
         "status": "sent",
         "command": command,
+        "machine_position": machine_position,
     }
 
 
@@ -123,9 +136,11 @@ def jog_task(axis, distance_mm, settings=None):
         result = _serial_error_result(serial_error)
         result["command"] = command
         return result
+    machine_position = None
     try:
         with open_serial_connection(settings=settings) as serial_connection:
             send_acl_command(serial_connection, command)
+            machine_position = query_machine_position(serial_connection, settings=settings)
     except Exception as exc:  # pylint: disable=W0718
         result = _serial_error_result(exc)
         result["command"] = command
@@ -135,4 +150,22 @@ def jog_task(axis, distance_mm, settings=None):
         "axis": axis,
         "distance_mm": distance_mm,
         "command": command,
+        "machine_position": machine_position,
     }
+
+
+@app.task(name="machine.get_position")
+def get_position_task(settings=None):
+    serial_error = get_serial_preflight_error(settings)
+    if serial_error:
+        return {"status": "poll_error", "error": serial_error}
+
+    try:
+        with open_serial_connection(settings=settings) as serial_connection:
+            machine_position = query_machine_position(serial_connection, settings=settings)
+            return {
+                "status": "poll_success",
+                "machine_position": machine_position,
+            }
+    except Exception as exc:
+        return {"status": "poll_error", "error": str(exc)}

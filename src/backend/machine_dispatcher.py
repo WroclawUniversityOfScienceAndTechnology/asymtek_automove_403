@@ -85,3 +85,9 @@ class MachineTaskDispatcher:
         task = self._load_tasks().jog_task.delay(axis, distance_mm, settings=payload.get("settings", {}))
         Logger().log_info("Machine jog task queued: " + task.id)
         return task.id
+
+    def trigger_get_position(self, payload):
+        from src.backend.machine_tasks import get_position_task
+        settings = payload.get("settings")
+        async_result = get_position_task.delay(settings=settings)
+        return async_result.id

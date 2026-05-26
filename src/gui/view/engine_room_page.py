@@ -68,6 +68,8 @@ class EngineRoomPage(Base):
             ("STEPSXY_PER_MM", "STEPSXY_PER_MM", "steps/mm"),
             ("STEPSZ_PER_MM", "STEPSZ_PER_MM", "steps/mm"),
         ]
+        self._position_poll_id = None
+        self._position_poll_interval_ms = 2000
 
     def update_impl(self, **kwargs):
         """
@@ -85,6 +87,7 @@ class EngineRoomPage(Base):
         self.machine_settings.update(kwargs.get("machine_settings", {}))
         self._normalize_line_positions()
         self._render()
+        self._schedule_position_poll()
 
     def _render(self):
         self.delete_canvas_items()
@@ -98,6 +101,7 @@ class EngineRoomPage(Base):
     def finish(self):
         self._close_serial_settings_dialog()
         self._cancel_simulation()
+        self._cancel_position_poll()
         super().finish()
 
     def _add_raw(self, item):
@@ -1142,6 +1146,12 @@ class EngineRoomPage(Base):
 
     def apply_machine_progress(self, progress):
         self.machine_progress = progress or {}
+        if self.machine_progress.get("status") == "poll_error":
+            return
+        if self.machine_progress.get("status") == "poll_success":
+            self._apply_machine_position(self.machine_progress)
+            self._refresh_machine_position_fields()
+            return
         self._apply_machine_position(self.machine_progress)
         line_index = self.machine_progress.get("line_index", self.machine_progress.get("last_line_index"))
         if line_index is not None:
@@ -1376,3 +1386,26 @@ class EngineRoomPage(Base):
     def _extruder_up(self, event):
         self.extruder_percent = min(150, self.extruder_percent + 5)
         self._render()
+
+    def _schedule_position_poll(self):
+        self._cancel_position_poll()
+        self._position_poll_id = self.canvas.after(self._position_poll_interval_ms, self._poll_position)
+
+    def _poll_position(self):
+        self._position_poll_id = None
+
+        idle_statuses = ("Idle", "Ready", "Complete", "Stopped", "Initialized", "Sim Jog", "Jogging")
+
+        if not self.simulation_mode and self.machine_status in idle_statuses:
+            settings = self._read_machine_settings()
+            if settings is not None:
+                self._emit("machine_get_position", event={"settings": settings})
+        self._schedule_position_poll()
+
+    def _cancel_position_poll(self):
+        if self._position_poll_id is not None:
+            try:
+                self.canvas.after_cancel(self._position_poll_id)
+            except tk.TclError:
+                pass
+            self._position_poll_id = None

@@ -231,6 +231,10 @@ class GuiStatesHandler:
         elif event_name in MACHINE_JOG_EVENTS:
             task_id = self.machine_dispatcher.jog(payload)
             self._start_machine_progress_poll(task_id)
+        elif event_name == "machine_get_position":
+            poll_task_id = self.machine_dispatcher.trigger_get_position(payload)
+            if poll_task_id:
+                self._poll_single_position_task(poll_task_id)
 
     def _start_machine_progress_poll(self, task_id):
         self._cancel_machine_progress_poll()
@@ -274,6 +278,24 @@ class GuiStatesHandler:
             return
         self._schedule_machine_progress_poll()
 
+    def _poll_single_position_task(self, task_id):
+        if not task_id:
+            return
+
+        result = self.machine_dispatcher.get_task_progress(task_id)
+
+        if result:
+            if result.get("status") in ("error", "FAILURE", "poll_error"):
+                Logger().log_warning(f"Zignorowano błąd odpytywania tła: {result.get('error', 'Unknown')}")
+                return
+
+            page = self._engine_room_page()
+            if page is not None and result.get("status") == "poll_success":
+                page.apply_machine_progress(result)
+            if result.get("done") or result.get("status") in ("poll_success", "success"):
+                return
+        self.canvas.after(50, lambda: self._poll_single_position_task(task_id))
+
     def _handle_manager_options(self, event_name, payload=None):
         if event_name == "engine_room":
             self.state_machine.logged()
@@ -292,6 +314,7 @@ class GuiStatesHandler:
             "extruder_minus",
             "extruder_plus",
             "machine_init",
+            "machine_get_position",
             *MACHINE_JOG_EVENTS,
         ):
             Logger().log_info("Machine UI event: " + event_name)
