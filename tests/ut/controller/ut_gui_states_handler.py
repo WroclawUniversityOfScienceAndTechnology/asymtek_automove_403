@@ -129,3 +129,29 @@ def test_machine_progress_poll_updates_engine_room_page():
 
     assert page.progress == {"task_id": "task-1", "done": True, "line_index": 2}
     assert handler._machine_task_id is None  # pylint: disable=protected-access
+
+
+def test_restore_default_machine_settings_updates_visible_engine_room_page(monkeypatch):
+    class PageSpy:
+        def __init__(self):
+            self.settings = None
+            self.status = None
+
+        def apply_machine_settings(self, settings, status=None):
+            self.settings = settings
+            self.status = status
+
+    default_settings = {"TIME_PER_SQMM": 1.0}
+    handler = GuiStatesHandler(state_machine=None, canvas=None)
+    page = PageSpy()
+    handler.pages[GuiStates.ENGINE_ROOM_STATE] = page
+    handler.present_state = GuiStates.ENGINE_ROOM_STATE
+    monkeypatch.setattr(
+        "src.controller.gui_states_handler.EngineRoomModel.restore_default_machine_settings",
+        classmethod(lambda cls: default_settings),
+    )
+
+    handler.restore_default_machine_settings()
+
+    assert page.settings == default_settings
+    assert page.status == "Defaults restored"

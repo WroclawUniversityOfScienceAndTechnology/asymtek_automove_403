@@ -114,6 +114,12 @@ class GuiStatesHandler:
         if page is not None:
             page.open_serial_settings_dialog(parent=parent)
 
+    def restore_default_machine_settings(self):
+        settings = EngineRoomModel.restore_default_machine_settings()
+        page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
+        if page is not None and self.present_state == GuiStates.ENGINE_ROOM_STATE:
+            page.apply_machine_settings(settings, status="Defaults restored")
+
     def _engine_room_page(self):
         return self.pages.get(GuiStates.ENGINE_ROOM_STATE)
 

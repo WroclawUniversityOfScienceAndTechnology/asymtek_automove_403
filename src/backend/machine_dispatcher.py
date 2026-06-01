@@ -53,16 +53,23 @@ class MachineTaskDispatcher:
             return None
 
         task_result = self._load_tasks().app.AsyncResult(task_id)
-        info = task_result.info if isinstance(task_result.info, dict) else {}
+
         progress = {
             "task_id": task_id,
             "state": task_result.state,
             "done": task_result.ready(),
         }
+
+        # 1. Pobieramy status tylko raz, aby uniknąć problemów ze współbieżnością (race condition)
+        raw_info = task_result.info
+        info = raw_info if isinstance(raw_info, dict) else {}
         progress.update(info)
 
-        result = task_result.result if task_result.ready() and isinstance(task_result.result, dict) else {}
+        # 2. Pobieramy wynik zadania również tylko raz
+        raw_result = task_result.result
+        result = raw_result if task_result.ready() and isinstance(raw_result, dict) else {}
         progress.update(result)
+
         return progress
 
     def send_current_command(self, payload):

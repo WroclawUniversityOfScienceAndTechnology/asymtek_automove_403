@@ -13,6 +13,8 @@ def _page_shell():
     page._embedded_widgets = []
     page._serial_settings_dialog = None
     page._simulation_after_id = None
+    page._position_poll_id = None
+    page._machine_settings_autosave_after_id = None
     page.active_file = "No Gerber loaded"
     page.machine_progress = {}
     page.machine_position = {"X": None, "Y": None, "Z": None}
@@ -258,4 +260,41 @@ def test_store_serial_settings_persists_user_config(monkeypatch):
     assert saved_values == [
         ("SERIAL_PORT", "COM9", "USER"),
         ("BAUD_RATE", 57600, "USER"),
+    ]
+
+
+def test_store_machine_settings_persists_editable_config(monkeypatch):
+    saved_calls = []
+    page = _page_shell()
+    settings = {
+        "TIME_PER_SQMM": 0.5,
+        "Z_OFFSET_PER_SEC": 0.25,
+        "Z_SAFE_HEIGHT": 12.0,
+        "STEPSXY_PER_MM": 88.8,
+        "STEPSZ_PER_MM": 22.0,
+        "PROGRAM_STEP_DELAY_SEC": 0.1,
+        "jog_distance_mm": 2.5,
+        "SERIAL_PORT": "COM7",
+    }
+
+    monkeypatch.setattr(
+        "src.gui.view.engine_room_page.EngineRoomModel.save_machine_settings",
+        classmethod(lambda cls, values, keys=None: saved_calls.append((values, keys))),
+    )
+
+    EngineRoomPage._store_machine_settings(page, settings)  # pylint: disable=protected-access
+
+    assert saved_calls == [
+        (
+            settings,
+            (
+                "TIME_PER_SQMM",
+                "Z_OFFSET_PER_SEC",
+                "Z_SAFE_HEIGHT",
+                "STEPSXY_PER_MM",
+                "STEPSZ_PER_MM",
+                "PROGRAM_STEP_DELAY_SEC",
+                "jog_distance_mm",
+            ),
+        )
     ]

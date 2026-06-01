@@ -459,5 +459,6 @@ def build_jog_command(axis, distance_mm, settings=None):
         return f"MR 0, {y_distance:.3f};"
     if axis == "Z":
         z_distance = distance_mm * machine_settings["STEPSZ_PER_MM"]
+        print("dist z ", z_distance)
         return f"MZ {z_distance:.3f};"
     raise ValueError("Unsupported jog axis: {}".format(axis))

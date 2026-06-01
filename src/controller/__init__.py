@@ -119,6 +119,10 @@ class MainController(tk.Tk):
         resolution_menu = tk.Menu(menu_bar, tearoff=False)
 
         machine_menu.add_command(label="Serial settings", command=self._open_serial_settings)
+        machine_menu.add_command(
+            label="Restore default machine parameters",
+            command=self._restore_default_machine_settings,
+        )
 
         for width, height in SUPPORTED_RESOLUTIONS:
             label = format_resolution(width, height)
@@ -136,6 +140,10 @@ class MainController(tk.Tk):
     def _open_serial_settings(self):
         if hasattr(self, "main_state_machine"):
             self.main_state_machine.open_serial_settings(self)
+
+    def _restore_default_machine_settings(self):
+        if hasattr(self, "main_state_machine"):
+            self.main_state_machine.restore_default_machine_settings()
 
     def _configure_canvas_resolution(self):
         self.canvas.configure(

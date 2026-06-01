@@ -22,6 +22,13 @@ def test_get_keys():
         "language",
         "pin",
         "temperature_units",
+        "TIME_PER_SQMM",
+        "Z_OFFSET_PER_SEC",
+        "Z_SAFE_HEIGHT",
+        "STEPSXY_PER_MM",
+        "STEPSZ_PER_MM",
+        "PROGRAM_STEP_DELAY_SEC",
+        "jog_distance_mm",
         "SERIAL_PORT",
         "BAUD_RATE",
     ]
@@ -103,6 +110,24 @@ def test_verify_baud_rate_wrong_type():
         assert ConfigVerificator.verify("BAUD_RATE", value) == False
 
 
+def test_verify_machine_float_settings():
+    for key in ["TIME_PER_SQMM", "Z_SAFE_HEIGHT", "STEPSXY_PER_MM", "STEPSZ_PER_MM", "jog_distance_mm"]:
+        assert ConfigVerificator.verify(key, 1)
+        assert ConfigVerificator.verify(key, 1.25)
+        assert ConfigVerificator.verify(key, 0) == False
+        assert ConfigVerificator.verify(key, False) == False
+        assert ConfigVerificator.verify(key, "1.25") == False
+
+
+def test_verify_non_negative_machine_float_settings():
+    for key in ["Z_OFFSET_PER_SEC", "PROGRAM_STEP_DELAY_SEC"]:
+        assert ConfigVerificator.verify(key, 0)
+        assert ConfigVerificator.verify(key, 1.25)
+        assert ConfigVerificator.verify(key, -0.1) == False
+        assert ConfigVerificator.verify(key, False) == False
+        assert ConfigVerificator.verify(key, "0.25") == False
+
+
 def test_verify_language():
     assert ConfigVerificator.verify("language", "en")
 
@@ -139,5 +164,18 @@ def test_get_section():
         "console_log_level",
     ]:
         assert ConfigVerificator.get_section(key) == "GENERAL"
-    for key in ["language", "pin", "temperature_units", "SERIAL_PORT", "BAUD_RATE"]:
+    for key in [
+        "language",
+        "pin",
+        "temperature_units",
+        "TIME_PER_SQMM",
+        "Z_OFFSET_PER_SEC",
+        "Z_SAFE_HEIGHT",
+        "STEPSXY_PER_MM",
+        "STEPSZ_PER_MM",
+        "PROGRAM_STEP_DELAY_SEC",
+        "jog_distance_mm",
+        "SERIAL_PORT",
+        "BAUD_RATE",
+    ]:
         assert ConfigVerificator.get_section(key) == "USER"

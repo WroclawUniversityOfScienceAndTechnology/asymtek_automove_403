@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # pylint: disable=C0114
+from src.backend.machine_management import DEFAULT_MACHINE_SETTINGS as BACKEND_DEFAULT_MACHINE_SETTINGS
 from src.business_logic.models.manager_model_base import ManagerModelBase
 from src.cfg import Configuration
 
@@ -14,18 +15,28 @@ class EngineRoomModel(ManagerModelBase):
         [type]: [description]
     """
 
-    DEFAULT_MACHINE_SETTINGS = {
-        "TIME_PER_SQMM": 1.0,
-        "Z_OFFSET_PER_SEC": 0.2,
-        "Z_SAFE_HEIGHT": 100.0,
-        "STEPSXY_PER_MM": 100.0,
-        "STEPSZ_PER_MM": 100.0,
-        "jog_distance_mm": 1.0,
-        "SERIAL_PORT": "/dev/ttyUSB0",
-        "BAUD_RATE": 9600,
-        "PROGRAM_STEP_DELAY_SEC": 0.25,
-    }
+    MACHINE_PARAMETER_KEYS = (
+        "TIME_PER_SQMM",
+        "Z_OFFSET_PER_SEC",
+        "Z_SAFE_HEIGHT",
+        "STEPSXY_PER_MM",
+        "STEPSZ_PER_MM",
+        "PROGRAM_STEP_DELAY_SEC",
+    )
+    JOG_DISTANCE_KEY = "jog_distance_mm"
+    EDITABLE_MACHINE_SETTING_KEYS = MACHINE_PARAMETER_KEYS + (JOG_DISTANCE_KEY,)
     SERIAL_CONFIG_KEYS = ("SERIAL_PORT", "BAUD_RATE")
+    DEFAULT_MACHINE_SETTINGS = {
+        "TIME_PER_SQMM": BACKEND_DEFAULT_MACHINE_SETTINGS["TIME_PER_SQMM"],
+        "Z_OFFSET_PER_SEC": BACKEND_DEFAULT_MACHINE_SETTINGS["Z_OFFSET_PER_SEC"],
+        "Z_SAFE_HEIGHT": BACKEND_DEFAULT_MACHINE_SETTINGS["Z_SAFE_HEIGHT"],
+        "STEPSXY_PER_MM": BACKEND_DEFAULT_MACHINE_SETTINGS["STEPSXY_PER_MM"],
+        "STEPSZ_PER_MM": BACKEND_DEFAULT_MACHINE_SETTINGS["STEPSZ_PER_MM"],
+        "PROGRAM_STEP_DELAY_SEC": BACKEND_DEFAULT_MACHINE_SETTINGS["PROGRAM_STEP_DELAY_SEC"],
+        "jog_distance_mm": 1.0,
+        "SERIAL_PORT": BACKEND_DEFAULT_MACHINE_SETTINGS["SERIAL_PORT"],
+        "BAUD_RATE": BACKEND_DEFAULT_MACHINE_SETTINGS["BAUD_RATE"],
+    }
 
     @classmethod
     def get_model_data(cls):
@@ -52,11 +63,26 @@ class EngineRoomModel(ManagerModelBase):
     @classmethod
     def get_machine_settings(cls):
         settings = cls.DEFAULT_MACHINE_SETTINGS.copy()
-        for key in cls.SERIAL_CONFIG_KEYS:
+        for key in cls.EDITABLE_MACHINE_SETTING_KEYS + cls.SERIAL_CONFIG_KEYS:
             try:
                 settings[key] = Configuration.get(key, section="USER")
             except RuntimeError:
                 pass
+        return settings
+
+    @classmethod
+    def save_machine_settings(cls, settings, keys=None):
+        keys = keys or cls.EDITABLE_MACHINE_SETTING_KEYS
+        for key in keys:
+            if key in settings:
+                Configuration.set(key, settings[key], section="USER")
+
+    @classmethod
+    def restore_default_machine_settings(cls):
+        settings = cls.get_machine_settings()
+        for key in cls.EDITABLE_MACHINE_SETTING_KEYS:
+            settings[key] = cls.DEFAULT_MACHINE_SETTINGS[key]
+        cls.save_machine_settings(settings, keys=cls.EDITABLE_MACHINE_SETTING_KEYS)
         return settings
 
     @classmethod

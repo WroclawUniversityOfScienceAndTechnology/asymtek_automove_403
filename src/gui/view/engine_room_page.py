@@ -10,7 +10,8 @@ from src.backend.machine_management import (
     list_serial_ports,
     parse_acl_toolpath,
 )
-from src.cfg import Configuration
+from src.business_logic.models.engine_room_model import EngineRoomModel
+from src.cfg import Configuration, ConfigVerificator
 from src.gui.tk_framework import Base, tk
 
 
@@ -50,23 +51,16 @@ class EngineRoomPage(Base):
         self._execution_line_list = None
         self._displayed_current_line = None
         self._preview_dynamic_items = []
-        self.machine_settings = {
-            "TIME_PER_SQMM": 1.0,
-            "Z_OFFSET_PER_SEC": 0.2,
-            "Z_SAFE_HEIGHT": 100.0,
-            "STEPSXY_PER_MM": 100.0,
-            "STEPSZ_PER_MM": 100.0,
-            "jog_distance_mm": 1.0,
-            "SERIAL_PORT": "/dev/ttyUSB0",
-            "BAUD_RATE": 9600,
-            "PROGRAM_STEP_DELAY_SEC": 0.25,
-        }
+        self._machine_settings_autosave_after_id = None
+        self._machine_settings_autosave_delay_ms = 500
+        self.machine_settings = EngineRoomModel.DEFAULT_MACHINE_SETTINGS.copy()
         self.machine_setting_fields = [
             ("TIME_PER_SQMM", "TIME_PER_SQMM", "s/mm2"),
             ("Z_OFFSET_PER_SEC", "Z_OFFSET_PER_SEC", "mm/s"),
             ("Z_SAFE_HEIGHT", "Z_SAFE_HEIGHT", "mm"),
             ("STEPSXY_PER_MM", "STEPSXY_PER_MM", "steps/mm"),
             ("STEPSZ_PER_MM", "STEPSZ_PER_MM", "steps/mm"),
+            ("PROGRAM_STEP_DELAY_SEC", "PROGRAM_STEP_DELAY_SEC", "s"),
         ]
         self._position_poll_id = None
         self._position_poll_interval_ms = 2000
@@ -100,6 +94,7 @@ class EngineRoomPage(Base):
 
     def finish(self):
         self._close_serial_settings_dialog()
+        self._cancel_machine_settings_autosave()
         self._cancel_simulation()
         self._cancel_position_poll()
         super().finish()
@@ -114,6 +109,7 @@ class EngineRoomPage(Base):
         return item
 
     def delete_canvas_items(self):
+        self._cancel_machine_settings_autosave()
         for widget in self._embedded_widgets:
             try:
                 widget.destroy()
@@ -600,10 +596,10 @@ class EngineRoomPage(Base):
         )
         self._button(
             1222,
-            744,
+            808,
             72,
             54,
-            "Z+",
+            "Z-",
             "machine_jog_z_plus",
             fill="#40536d",
             callback=lambda event: self._jog("Z", 1),
@@ -611,19 +607,18 @@ class EngineRoomPage(Base):
         )
         self._button(
             1222,
-            808,
+            744,
             72,
             54,
-            "Z-",
+            "Z+",
             "machine_jog_z_minus",
             fill="#40536d",
             callback=lambda event: self._jog("Z", -1),
             emit_on_none=False,
         )
-        self._add_machine_position_row()
+        self._add_machine_position_row(y=966)
 
-    def _add_machine_position_row(self):
-        y = 924
+    def _add_machine_position_row(self, y=924):
         self._text(436, y + 8, "Current position", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
         for idx, axis in enumerate(("X", "Y", "Z")):
             x = 620 + idx * 154
@@ -650,6 +645,9 @@ class EngineRoomPage(Base):
             bd=1,
         )
         entry.insert(0, self._format_setting_value(value))
+        entry.bind("<KeyRelease>", self._schedule_machine_settings_autosave)
+        entry.bind("<FocusOut>", self._autosave_machine_settings_from_entries)
+        entry.bind("<Return>", self._autosave_machine_settings_from_entries)
         self._machine_setting_entries[key] = entry
         self._window(x, y, width, height, entry, anchor=tk.NW)
         return entry
@@ -1025,6 +1023,33 @@ class EngineRoomPage(Base):
         for axis, text_item in self._machine_position_text_items.items():
             self.canvas.itemconfig(text_item, text=self._format_position_value(axis))
 
+    def _cancel_machine_settings_autosave(self):
+        after_id = getattr(self, "_machine_settings_autosave_after_id", None)
+        canvas = getattr(self, "canvas", None)
+        if after_id is None or canvas is None:
+            self._machine_settings_autosave_after_id = None
+            return
+        try:
+            canvas.after_cancel(after_id)
+        except tk.TclError:
+            pass
+        self._machine_settings_autosave_after_id = None
+
+    def _schedule_machine_settings_autosave(self, event=None):
+        self._cancel_machine_settings_autosave()
+        canvas = getattr(self, "canvas", None)
+        if canvas is None:
+            self._autosave_machine_settings_from_entries(event)
+            return
+        self._machine_settings_autosave_after_id = canvas.after(
+            getattr(self, "_machine_settings_autosave_delay_ms", 500),
+            self._autosave_machine_settings_from_entries,
+        )
+
+    def _autosave_machine_settings_from_entries(self, event=None):
+        self._machine_settings_autosave_after_id = None
+        self._read_machine_settings(update_status=False, persist=True)
+
     def _format_setting_value(self, value):
         if isinstance(value, float) and value.is_integer():
             return str(int(value))
@@ -1056,7 +1081,7 @@ class EngineRoomPage(Base):
             summary += " sent {}/{}".format(sent_count, total_count)
         return summary
 
-    def _read_machine_settings(self):
+    def _read_machine_settings(self, update_status=True, persist=True):
         updated_settings = self.machine_settings.copy()
         for key, entry in self._machine_setting_entries.items():
             raw_value = entry.get().strip().replace(",", ".")
@@ -1067,11 +1092,33 @@ class EngineRoomPage(Base):
                     updated_settings[key] = int(float(raw_value))
                 else:
                     updated_settings[key] = float(raw_value)
+                if ConfigVerificator.check(key) and not ConfigVerificator.verify(key, updated_settings[key]):
+                    raise ValueError
             except ValueError:
-                self.machine_status = "Invalid input"
+                if update_status:
+                    self.machine_status = "Invalid input"
                 return None
         self.machine_settings = updated_settings
+        if persist and self._machine_setting_entries:
+            try:
+                self._store_machine_settings(updated_settings)
+            except RuntimeError:
+                if update_status:
+                    self.machine_status = "Invalid input"
+                return None
         return updated_settings.copy()
+
+    def _store_machine_settings(self, settings):
+        EngineRoomModel.save_machine_settings(
+            settings,
+            keys=EngineRoomModel.EDITABLE_MACHINE_SETTING_KEYS,
+        )
+
+    def apply_machine_settings(self, settings, status=None):
+        self.machine_settings.update(settings)
+        if status:
+            self.machine_status = status
+        self._render()
 
     def _apply_machine_position(self, progress):
         position = progress.get("position", progress.get("machine_position"))
