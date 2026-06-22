@@ -191,7 +191,7 @@ def generate_acl_from_layer(layer, settings=None):
         # 4. Dispensing
         commands.append("CD2;")
         commands.append(f"WA {dispense_time_sec:.3f};")
-        commands.append("CD0;")
+        commands.append("CD0; OA; OZ;")
 
         # 5. Relative Z raise (MZ) to safe height
         dz_up = target_z_safe - current_z
@@ -351,26 +351,12 @@ def _parse_acl_numbers(response, expected_count):
         raise AclMachineError("Invalid ACL numeric response: {}".format(response)) from exc
 
 
-def query_machine_position(serial_connection, settings=None):
-    """
-    Query current machine position through ACL output commands.
-
-    Per the ACL manual, OA outputs actual XY position and waits until prior
-    physical action finishes. OZ outputs the Z counter. Both values are reported
-    by the machine in motor counts, so this returns millimeters for the UI.
-    """
+def read_machine_position(serial_connection, settings=None):
+    """Reads machine position from the serial buffer without sending new commands."""
     machine_settings = normalize_machine_settings(settings)
     timeout = machine_settings["COMMAND_TIMEOUT_SEC"]
 
-    try:
-        serial_connection.reset_input_buffer()
-    except Exception:
-        pass
-
-    send_acl_command(serial_connection, "OA;")
     x_steps, y_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 2)
-
-    send_acl_command(serial_connection, "OZ;")
     z_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 1)[0]
 
     return {
@@ -379,15 +365,23 @@ def query_machine_position(serial_connection, settings=None):
         "z": z_steps / machine_settings["STEPSZ_PER_MM"],
     }
 
+def query_machine_position(serial_connection, settings=None):
+    """
+    Query current machine position through ACL output commands.
+    """
+    try:
+        serial_connection.reset_input_buffer()
+    except Exception:
+        pass
+
+    send_acl_command(serial_connection, "OA; OZ;")
+    return read_machine_position(serial_connection, settings=settings)
+
 
 def send_acl_command_and_wait(serial_connection, command, settings=None):
-    """
-    Send one ACL command, wait until it is physically complete, and return position.
-
-    ACL has an input buffer, so a host cannot assume that a write has completed
-    the move. A following OA/OZ output request provides the completion barrier.
-    """
     send_acl_command(serial_connection, command)
+    if "OA;" in command and "OZ;" in command:
+        return read_machine_position(serial_connection, settings=settings)
     return query_machine_position(serial_connection, settings=settings)
 
 
@@ -442,7 +436,23 @@ def send_acl_program(
 
             machine_position = None
 
-            if "MR" in command or "MZ" in command:
+            # Nowa logika odczytująca pozycję w przerwie
+            if "OA;" in command and "OZ;" in command:
+                original_timeout = serial_connection.timeout
+                try:
+                    serial_connection.timeout = 5.0
+                    machine_position = read_machine_position(serial_connection, settings=machine_settings)
+                except Exception:
+                    try:
+                        serial_connection.reset_input_buffer()
+                        serial_connection.reset_output_buffer()
+                    except Exception:
+                        pass
+                    sleep_func(machine_settings["PROGRAM_STEP_DELAY_SEC"])
+                finally:
+                    serial_connection.timeout = original_timeout
+            elif "MR" in command or "MZ" in command:
+                # Zachowanie kompatybilności dla starszych programów w razie braku połączonych komend
                 original_timeout = serial_connection.timeout
                 try:
                     serial_connection.timeout = 5.0
@@ -483,12 +493,12 @@ def build_jog_command(axis, distance_mm, settings=None):
     machine_settings = normalize_machine_settings(settings)
     if axis == "X":
         x_distance = distance_mm * machine_settings["STEPSXY_PER_MM"]
-        return f"MR {x_distance:.3f}, 0;"
+        return f"MR {x_distance:.3f}, 0; OA; OZ;"
     if axis == "Y":
         y_distance = distance_mm * machine_settings["STEPSXY_PER_MM"]
-        return f"MR 0, {y_distance:.3f};"
+        return f"MR 0, {y_distance:.3f}; OA; OZ;"
     if axis == "Z":
         z_distance = distance_mm * machine_settings["STEPSZ_PER_MM"]
         print("dist z ", z_distance)
-        return f"MZ {z_distance:.3f};"
+        return f"MZ {z_distance:.3f}; OA; OZ;"
     raise ValueError("Unsupported jog axis: {}".format(axis))

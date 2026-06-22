@@ -238,9 +238,11 @@ class GuiStatesHandler:
             task_id = self.machine_dispatcher.jog(payload)
             self._start_machine_progress_poll(task_id)
         elif event_name == "machine_get_position":
-            poll_task_id = self.machine_dispatcher.trigger_get_position(payload)
-            if poll_task_id:
-                self._poll_single_position_task(poll_task_id)
+            if not getattr(self, "_position_task_active", False):
+                poll_task_id = self.machine_dispatcher.trigger_get_position(payload)
+                if poll_task_id:
+                    self._position_task_active = True
+                    self._poll_single_position_task(poll_task_id)
         elif event_name == "machine_init":
             task_id = self.machine_dispatcher.init_machine(payload)
             self._start_machine_progress_poll(task_id)
@@ -306,7 +308,7 @@ class GuiStatesHandler:
                 page.apply_machine_progress(result)
             if result.get("done") or result.get("status") in ("poll_success", "success"):
                 return
-        self.canvas.after(50, lambda: self._poll_single_position_task(task_id))
+        self.canvas.after(500, lambda: self._poll_single_position_task(task_id))
 
     def _handle_manager_options(self, event_name, payload=None):
         if event_name == "engine_room":

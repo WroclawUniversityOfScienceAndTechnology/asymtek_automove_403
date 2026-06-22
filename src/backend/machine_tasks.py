@@ -17,6 +17,7 @@ from src.backend.machine_management import (
     send_acl_program,
     send_acl_command_and_wait,
     query_machine_position,
+    read_machine_position,
 )
 
 
@@ -120,7 +121,10 @@ def send_acl_command_task(command, settings=None):
     try:
         with open_serial_connection(settings=settings) as serial_connection:
             send_acl_command(serial_connection, command)
-            machine_position = query_machine_position(serial_connection, settings=settings)
+            if "OA;" in command and "OZ;" in command:
+                machine_position = read_machine_position(serial_connection, settings=settings)
+            else:
+                machine_position = query_machine_position(serial_connection, settings=settings)
     except Exception as exc:  # pylint: disable=W0718
         return _serial_error_result(exc)
     return {
@@ -128,7 +132,6 @@ def send_acl_command_task(command, settings=None):
         "command": command,
         "machine_position": machine_position,
     }
-
 
 @app.task(name="machine.jog")
 def jog_task(axis, distance_mm, settings=None):
@@ -142,7 +145,10 @@ def jog_task(axis, distance_mm, settings=None):
     try:
         with open_serial_connection(settings=settings) as serial_connection:
             send_acl_command(serial_connection, command)
-            machine_position = query_machine_position(serial_connection, settings=settings)
+            if "OA;" in command and "OZ;" in command:
+                machine_position = read_machine_position(serial_connection, settings=settings)
+            else:
+                machine_position = query_machine_position(serial_connection, settings=settings)
     except Exception as exc:  # pylint: disable=W0718
         result = _serial_error_result(exc)
         result["command"] = command

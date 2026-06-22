@@ -51,7 +51,7 @@ class MachineTaskDispatcher:
     def init_machine(self, payload):
         settings = payload.get("settings", {})
         task = self._load_tasks().send_acl_command_task.delay(
-            "in;",
+            "in; OA; OZ;",
             settings=settings
         )
         return task.id
@@ -59,7 +59,7 @@ class MachineTaskDispatcher:
     def home_machine(self, payload):
         settings = payload.get("settings", {})
         task = self._load_tasks().send_acl_command_task.delay(
-            "fh;",
+            "fh; OA; OZ;",
             settings=settings
         )
         return task.id

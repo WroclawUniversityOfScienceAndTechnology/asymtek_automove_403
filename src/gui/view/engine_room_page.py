@@ -63,7 +63,7 @@ class EngineRoomPage(Base):
             ("PROGRAM_STEP_DELAY_SEC", "PROGRAM_STEP_DELAY_SEC", "s"),
         ]
         self._position_poll_id = None
-        self._position_poll_interval_ms = 2000
+        self._position_poll_interval_ms = 5000
 
     def update_impl(self, **kwargs):
         """
