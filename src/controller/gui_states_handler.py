@@ -241,6 +241,12 @@ class GuiStatesHandler:
             poll_task_id = self.machine_dispatcher.trigger_get_position(payload)
             if poll_task_id:
                 self._poll_single_position_task(poll_task_id)
+        elif event_name == "machine_init":
+            task_id = self.machine_dispatcher.init_machine(payload)
+            self._start_machine_progress_poll(task_id)
+        elif event_name == "machine_home":
+            task_id = self.machine_dispatcher.home_machine(payload)
+            self._start_machine_progress_poll(task_id)
 
     def _start_machine_progress_poll(self, task_id):
         self._cancel_machine_progress_poll()
@@ -320,6 +326,7 @@ class GuiStatesHandler:
             "extruder_minus",
             "extruder_plus",
             "machine_init",
+            "machine_home",
             "machine_get_position",
             *MACHINE_JOG_EVENTS,
         ):

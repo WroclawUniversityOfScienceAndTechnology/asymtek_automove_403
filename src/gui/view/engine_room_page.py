@@ -395,13 +395,25 @@ class EngineRoomPage(Base):
         self._button(
             52,
             728,
-            304,
+            140,
             58,
             "INIT",
             "machine_init",
             fill="#16833a",
             outline="#16833a",
             callback=self._machine_init,
+            emit_on_none=False,
+        )
+        self._button(
+            216,
+            728,
+            140,
+            58,
+            "HOME",
+            "machine_home",
+            fill="#16833a",
+            outline="#16833a",
+            callback=self._machine_home,
             emit_on_none=False,
         )
 
@@ -1138,6 +1150,19 @@ class EngineRoomPage(Base):
         return False, None
 
     def _machine_init(self, event):
+        settings = self._read_machine_settings()
+        if settings is None:
+            self._render()
+            return None
+        if self.simulation_mode:
+            self.machine_status = "Simulation"
+            self._render()
+            return {"settings": settings, "simulation_mode": True}
+        self.machine_status = "Initialized"
+        self._render()
+        return {"settings": settings}
+
+    def _machine_home(self, event):
         settings = self._read_machine_settings()
         if settings is None:
             self._render()

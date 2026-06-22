@@ -48,6 +48,22 @@ class MachineTaskDispatcher:
         Logger().log_info("Machine program stop requested: " + task_id)
         return task_id
 
+    def init_machine(self, payload):
+        settings = payload.get("settings", {})
+        task = self._load_tasks().send_acl_command_task.delay(
+            "in;",
+            settings=settings
+        )
+        return task.id
+
+    def home_machine(self, payload):
+        settings = payload.get("settings", {})
+        task = self._load_tasks().send_acl_command_task.delay(
+            "fh;",
+            settings=settings
+        )
+        return task.id
+
     def get_task_progress(self, task_id):
         if not task_id:
             return None
