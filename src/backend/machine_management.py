@@ -362,8 +362,14 @@ def query_machine_position(serial_connection, settings=None):
     machine_settings = normalize_machine_settings(settings)
     timeout = machine_settings["COMMAND_TIMEOUT_SEC"]
 
+    try:
+        serial_connection.reset_input_buffer()
+    except Exception:
+        pass
+
     send_acl_command(serial_connection, "OA;")
     x_steps, y_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 2)
+
     send_acl_command(serial_connection, "OZ;")
     z_steps = _parse_acl_numbers(read_acl_response(serial_connection, timeout=timeout), 1)[0]
 
@@ -411,41 +417,65 @@ def _sleep_after_acl_command(delay_sec, sleep_func, control_callback, line_index
 
 
 def send_acl_program(
-    commands,
-    settings=None,
-    start_index=0,
-    progress_callback=None,
-    control_callback=None,
-    sleep_func=time.sleep,
+        commands,
+        settings=None,
+        start_index=0,
+        progress_callback=None,
+        control_callback=None,
+        sleep_func=time.sleep,
 ):
     """
     Send ACL commands to the machine from start_index to the end.
-
-    This function is designed to run in a Celery worker, not in the Tk thread.
-    control_callback may return "stop" to end the program before the next write.
+    Uses an advanced handshake that prevents protocol desynchronization.
     """
     sent_commands = []
     machine_settings = normalize_machine_settings(settings)
     last_line_index = len(commands) - 1
+
     with open_serial_connection(settings=settings) as serial_connection:
         for line_index, command in enumerate(commands[start_index:], start=start_index):
             if _program_control_requests_stop(control_callback, line_index, command, len(sent_commands)):
                 break
+
             send_acl_command(serial_connection, command)
             sent_commands.append({"line_index": line_index, "command": command})
+
+            machine_position = None
+
+            if "MR" in command or "MZ" in command:
+                original_timeout = serial_connection.timeout
+                try:
+                    serial_connection.timeout = 5.0
+                    machine_position = query_machine_position(serial_connection, settings=machine_settings)
+                except Exception:
+                    try:
+                        serial_connection.reset_input_buffer()
+                        serial_connection.reset_output_buffer()
+                    except Exception:
+                        pass
+                    sleep_func(machine_settings["PROGRAM_STEP_DELAY_SEC"])
+                finally:
+                    serial_connection.timeout = original_timeout
+
             if progress_callback is not None:
-                progress_callback(line_index, command, len(sent_commands))
+                try:
+                    progress_callback(line_index, command, len(sent_commands), machine_position=machine_position)
+                except TypeError:
+                    progress_callback(line_index, command, len(sent_commands))
+
             if line_index < last_line_index:
-                delay_sec = get_acl_command_delay(command, settings=machine_settings)
-                if _sleep_after_acl_command(
-                    delay_sec,
-                    sleep_func,
-                    control_callback,
-                    line_index,
-                    command,
-                    len(sent_commands),
-                ):
-                    break
+                if not ("MR" in command or "MZ" in command):
+                    delay_sec = get_acl_command_delay(command, settings=machine_settings)
+                    if _sleep_after_acl_command(
+                            delay_sec,
+                            sleep_func,
+                            control_callback,
+                            line_index,
+                            command,
+                            len(sent_commands),
+                    ):
+                        break
+
     return sent_commands
 
 

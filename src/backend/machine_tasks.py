@@ -27,7 +27,7 @@ def _serial_error_result(exc):
     }
 
 
-def _program_progress_payload(line_index, command, sent_count, total_count, status="sending"):
+def _program_progress_payload(line_index, command, sent_count, total_count, status="sending", machine_position=None):
     return {
         "event": "program_progress",
         "status": status,
@@ -35,6 +35,7 @@ def _program_progress_payload(line_index, command, sent_count, total_count, stat
         "command": command,
         "sent_count": sent_count,
         "total_count": total_count,
+        "machine_position": machine_position,
     }
 
 
@@ -50,10 +51,11 @@ def send_acl_program_task(self, commands, settings=None, start_index=0):
     try:
         total_count = len(commands)
 
-        def publish_progress(line_index, command, sent_count, status="sending"):
+        def publish_progress(line_index, command, sent_count, status="sending", machine_position=None):
             self.update_state(
                 state="PROGRESS",
-                meta=_program_progress_payload(line_index, command, sent_count, total_count, status=status),
+                meta=_program_progress_payload(
+                    line_index, command, sent_count, total_count, status=status, machine_position=machine_position),
             )
 
         def apply_program_control(line_index, command, sent_count):
