@@ -184,7 +184,7 @@ def generate_acl_from_layer(layer, settings=None):
         # 3. Relative Z lower (MZ) to dispensing height
         dz_down = target_z_dispense - current_z
         if dz_down != 0:
-            commands.append(f"MZ {dz_down:.3f};")
+            commands.append(f"MZ {dz_down:.3f}; OA; OZ;")
 
         current_z = target_z_dispense
 
@@ -196,7 +196,7 @@ def generate_acl_from_layer(layer, settings=None):
         # 5. Relative Z raise (MZ) to safe height
         dz_up = target_z_safe - current_z
         if dz_up != 0:
-            commands.append(f"MZ {dz_up:.3f};")
+            commands.append(f"MZ {dz_up:.3f}; OA; OZ;")
 
         current_z = target_z_safe
 
