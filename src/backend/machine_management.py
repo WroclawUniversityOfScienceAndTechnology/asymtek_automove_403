@@ -2,6 +2,7 @@ import math
 import os
 import re
 import time
+from bisect import bisect_right
 from dataclasses import dataclass
 
 
@@ -137,6 +138,43 @@ def generate_acl_from_layer(layer, settings=None):
     z_safe_height = machine_settings["Z_SAFE_HEIGHT"]
     stepsxy_per_mm = machine_settings["STEPSXY_PER_MM"]
     stepsz_per_mm = machine_settings["STEPSZ_PER_MM"]
+    bed_points = (settings or {}).get("Z_BED_POINTS", [])
+    reference_z = bed_points[0].get("z_steps", 0) if bed_points else 0
+    bed_grid = {}
+    for point in bed_points:
+        try:
+            px, py = float(point["x"]), float(point["y"])
+            correction = float(point["z_steps"]) - float(reference_z)
+        except (KeyError, TypeError, ValueError):
+            continue
+        bed_grid[(px, py)] = correction
+    bed_xs = sorted({x for x, _ in bed_grid})
+    bed_ys = sorted({y for _, y in bed_grid})
+
+    def _linear_interval(coordinates, value):
+        """Choose an adjacent pair, extending the edge pair beyond the sample area."""
+        if len(coordinates) < 2:
+            return None
+        lower = bisect_right(coordinates, value) - 1
+        lower = min(max(lower, 0), len(coordinates) - 2)
+        return coordinates[lower], coordinates[lower + 1]
+
+    def bed_correction(x_mm, y_mm):
+        x_interval = _linear_interval(bed_xs, x_mm)
+        y_interval = _linear_interval(bed_ys, y_mm)
+        if x_interval is None or y_interval is None:
+            return 0.0
+        x0, x1 = x_interval
+        y0, y1 = y_interval
+        corners = ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
+        if any(corner not in bed_grid for corner in corners):
+            return 0.0
+        tx = (x_mm - x0) / (x1 - x0)
+        ty = (y_mm - y0) / (y1 - y0)
+        z00, z10, z01, z11 = (bed_grid[corner] for corner in corners)
+        lower = z00 + (z10 - z00) * tx
+        upper = z01 + (z11 - z01) * tx
+        return lower + (upper - lower) * ty
 
     commands = []
 
@@ -169,7 +207,7 @@ def generate_acl_from_layer(layer, settings=None):
 
         # Dispensing height
         # (Positive value because Z is inverted, so positive moves DOWN towards the board)
-        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm
+        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(obj.x, obj.y)
 
         # 2. Relative XY move (MR)
         dx = target_x - current_x
@@ -352,7 +390,7 @@ def _parse_acl_numbers(response, expected_count):
 
 
 def read_machine_position(serial_connection, settings=None):
-    """Reads machine position from the serial buffer without sending new commands."""
+    """Read XY and Z position values from the serial buffer."""
     machine_settings = normalize_machine_settings(settings)
     timeout = machine_settings["COMMAND_TIMEOUT_SEC"]
 

@@ -54,6 +54,9 @@ class MainStateMachine(StateMachine):
     def open_serial_settings(self, parent=None):
         self.gui_states_handler.open_serial_settings(parent=parent)
 
+    def open_z_compensation(self, parent=None):
+        self.gui_states_handler.open_z_compensation(parent=parent)
+
     def restore_default_machine_settings(self):
         self.gui_states_handler.restore_default_machine_settings()
 

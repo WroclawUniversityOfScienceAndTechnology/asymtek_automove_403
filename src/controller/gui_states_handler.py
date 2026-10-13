@@ -114,6 +114,11 @@ class GuiStatesHandler:
         if page is not None:
             page.open_serial_settings_dialog(parent=parent)
 
+    def open_z_compensation(self, parent=None):
+        page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
+        if page is not None:
+            page.open_z_compensation_dialog(parent=parent)
+
     def restore_default_machine_settings(self):
         settings = EngineRoomModel.restore_default_machine_settings()
         page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
@@ -243,11 +248,17 @@ class GuiStatesHandler:
                 if poll_task_id:
                     self._position_task_active = True
                     self._poll_single_position_task(poll_task_id)
+        elif event_name == "calibration_command":
+            task_id = self.machine_dispatcher.send_current_command(payload)
+            self._start_machine_progress_poll(task_id)
         elif event_name == "machine_init":
             task_id = self.machine_dispatcher.init_machine(payload)
             self._start_machine_progress_poll(task_id)
         elif event_name == "machine_home":
             task_id = self.machine_dispatcher.home_machine(payload)
+            self._start_machine_progress_poll(task_id)
+        elif event_name == "set_origin":
+            task_id = self.machine_dispatcher.set_origin(payload)
             self._start_machine_progress_poll(task_id)
 
     def _start_machine_progress_poll(self, task_id):
@@ -282,10 +293,18 @@ class GuiStatesHandler:
         if not self._machine_task_id:
             return
 
-        progress = self.machine_dispatcher.get_task_progress(self._machine_task_id)
+        polled_task_id = self._machine_task_id
+        progress = self.machine_dispatcher.get_task_progress(polled_task_id)
         page = self._engine_room_page()
         if progress and page is not None:
             page.apply_machine_progress(progress)
+
+        # Applying a completed task can synchronously dispatch the next calibration
+        # move. Do not clear that new task when returning from the previous poll.
+        if self._machine_task_id != polled_task_id:
+            if self._machine_task_id and self._machine_progress_after_id is None:
+                self._schedule_machine_progress_poll()
+            return
 
         if progress and progress.get("done"):
             self._machine_task_id = None
@@ -294,6 +313,7 @@ class GuiStatesHandler:
 
     def _poll_single_position_task(self, task_id):
         if not task_id:
+            self._position_task_active = False
             return
 
         result = self.machine_dispatcher.get_task_progress(task_id)
@@ -301,13 +321,18 @@ class GuiStatesHandler:
         if result:
             if result.get("status") in ("error", "FAILURE", "poll_error"):
                 Logger().log_warning(f"Zignorowano błąd odpytywania tła: {result.get('error', 'Unknown')}")
+                self._position_task_active = False
                 return
 
             page = self._engine_room_page()
             if page is not None and result.get("status") == "poll_success":
                 page.apply_machine_progress(result)
             if result.get("done") or result.get("status") in ("poll_success", "success"):
+                self._position_task_active = False
                 return
+        if self.canvas is None:
+            self._position_task_active = False
+            return
         self.canvas.after(500, lambda: self._poll_single_position_task(task_id))
 
     def _handle_manager_options(self, event_name, payload=None):
@@ -329,6 +354,8 @@ class GuiStatesHandler:
             "extruder_plus",
             "machine_init",
             "machine_home",
+            "set_origin",
+            "calibration_command",
             "machine_get_position",
             *MACHINE_JOG_EVENTS,
         ):

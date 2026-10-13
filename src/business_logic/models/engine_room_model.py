@@ -26,6 +26,7 @@ class EngineRoomModel(ManagerModelBase):
     JOG_DISTANCE_KEY = "jog_distance_mm"
     EDITABLE_MACHINE_SETTING_KEYS = MACHINE_PARAMETER_KEYS + (JOG_DISTANCE_KEY,)
     SERIAL_CONFIG_KEYS = ("SERIAL_PORT", "BAUD_RATE")
+    CALIBRATION_KEYS = ("Z_BED_POINTS",)
     DEFAULT_MACHINE_SETTINGS = {
         "TIME_PER_SQMM": BACKEND_DEFAULT_MACHINE_SETTINGS["TIME_PER_SQMM"],
         "Z_OFFSET_PER_SEC": BACKEND_DEFAULT_MACHINE_SETTINGS["Z_OFFSET_PER_SEC"],
@@ -36,6 +37,7 @@ class EngineRoomModel(ManagerModelBase):
         "jog_distance_mm": 1.0,
         "SERIAL_PORT": BACKEND_DEFAULT_MACHINE_SETTINGS["SERIAL_PORT"],
         "BAUD_RATE": BACKEND_DEFAULT_MACHINE_SETTINGS["BAUD_RATE"],
+        "Z_BED_POINTS": [],
     }
 
     @classmethod
@@ -63,7 +65,7 @@ class EngineRoomModel(ManagerModelBase):
     @classmethod
     def get_machine_settings(cls):
         settings = cls.DEFAULT_MACHINE_SETTINGS.copy()
-        for key in cls.EDITABLE_MACHINE_SETTING_KEYS + cls.SERIAL_CONFIG_KEYS:
+        for key in cls.EDITABLE_MACHINE_SETTING_KEYS + cls.SERIAL_CONFIG_KEYS + cls.CALIBRATION_KEYS:
             try:
                 settings[key] = Configuration.get(key, section="USER")
             except RuntimeError:

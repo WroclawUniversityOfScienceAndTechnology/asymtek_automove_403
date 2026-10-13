@@ -42,6 +42,8 @@ class EngineRoomPage(Base):
         self._machine_setting_entries = {}
         self._machine_position_text_items = {}
         self._serial_settings_dialog = None
+        self._z_compensation_dialog = None
+        self._calibration_move_callback = None
         self._status_text_item = None
         self._progress_bar_item = None
         self._progress_text_item = None
@@ -94,6 +96,7 @@ class EngineRoomPage(Base):
 
     def finish(self):
         self._close_serial_settings_dialog()
+        self._close_z_compensation_dialog()
         self._cancel_machine_settings_autosave()
         self._cancel_simulation()
         self._cancel_position_poll()
@@ -417,21 +420,34 @@ class EngineRoomPage(Base):
             emit_on_none=False,
         )
 
-        self._text(52, 820, "Extruder time", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
-        self._button(52, 864, 74, 58, "-5%", "extruder_minus", fill="#40536d", callback=self._extruder_down)
-        self._rect(144, 864, 264, 912, fill="#ffffff", outline="#cad5e3", width=2)
+        self._button(
+            52,
+            806,
+            304,
+            58,
+            "SET ORIGIN",
+            "set_origin",
+            fill="#16833a",
+            outline="#16833a",
+            callback=self._set_origin,
+            emit_on_none=False,
+        )
+
+        self._text(52, 870, "Extruder time", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
+        self._button(52, 914, 74, 58, "-5%", "extruder_minus", fill="#40536d", callback=self._extruder_down)
+        self._rect(144, 914, 264, 912, fill="#ffffff", outline="#cad5e3", width=2)
         self._text(
             204,
-            893,
+            943,
             str(self.extruder_percent) + "%",
             fill="#172033",
             font=(self.default_font or "Helvetica", 22, "bold"),
             anchor=tk.CENTER,
         )
-        self._button(282, 864, 74, 58, "+5%", "extruder_plus", fill="#40536d", callback=self._extruder_up)
+        self._button(282, 914, 74, 58, "+5%", "extruder_plus", fill="#40536d", callback=self._extruder_up)
         self._text(
             52,
-            962,
+            982,
             "Use the software with ACL base machines.",
             fill="#6b778c",
             font=(self.default_font or "Helvetica", 13),
@@ -681,6 +697,214 @@ class EngineRoomPage(Base):
                 dialog.destroy()
         except tk.TclError:
             pass
+
+    def open_z_compensation_dialog(self, parent=None):
+        if self._z_compensation_dialog is not None:
+            try:
+                self._z_compensation_dialog.lift()
+                self._z_compensation_dialog.focus_force()
+                return
+            except tk.TclError:
+                self._z_compensation_dialog = None
+        parent = parent or self.canvas.winfo_toplevel()
+        dialog = tk.Toplevel(parent)
+        self._z_compensation_dialog = dialog
+        dialog.title("Z Compensation")
+        dialog.resizable(False, False)
+        dialog.transient(parent)
+        width_var = tk.StringVar(value="100")
+        height_var = tk.StringVar(value="100")
+        edge_offset_var = tk.StringVar(value="5")
+        count_var = tk.StringVar(value="9")
+        save_calibration_var = tk.BooleanVar(value=True)
+        content = ttk.Frame(dialog, padding=16)
+        content.grid(row=0, column=0, sticky="nsew")
+        for row, (label, var) in enumerate((
+            ("Board width (mm)", width_var),
+            ("Board height (mm)", height_var),
+            ("Edge offset (mm)", edge_offset_var),
+        )):
+            ttk.Label(content, text=label).grid(row=row, column=0, padx=(0, 12), pady=6, sticky="w")
+            ttk.Entry(content, textvariable=var, width=12).grid(row=row, column=1, pady=6, sticky="w")
+        ttk.Label(content, text="Control points").grid(row=3, column=0, padx=(0, 12), pady=6, sticky="w")
+        ttk.Combobox(content, textvariable=count_var, values=("4", "9", "16", "25"), state="readonly", width=9).grid(row=3, column=1, pady=6, sticky="w")
+        save_calibration_checkbox = ttk.Checkbutton(
+            content,
+            text="Save calibration after app restart",
+            variable=save_calibration_var,
+            command=lambda: save_completed_calibration_preference(),
+        )
+        save_calibration_checkbox.grid(row=4, column=0, columnspan=2, pady=(6, 0), sticky="w")
+        status_var = tk.StringVar(value="Set machine origin at the board corner, enter board size, then start calibration.")
+        ttk.Label(content, textvariable=status_var, wraplength=390).grid(row=5, column=0, columnspan=2, pady=(8, 12), sticky="w")
+        points = []
+        index = {"value": 0}
+        calibration = {"save_after_restart": True, "complete": False}
+
+        def send_calibration_command(command, on_success, command_timeout=0.5, on_failure=None):
+            settings = self._read_machine_settings(update_status=False)
+            if settings is None:
+                if on_failure and dialog.winfo_exists():
+                    on_failure()
+                return
+            settings["COMMAND_TIMEOUT_SEC"] = command_timeout
+
+            def after_command(completed_progress):
+                if not dialog.winfo_exists() or self._z_compensation_dialog is not dialog:
+                    return
+                if completed_progress.get("status") == "sent":
+                    on_success(completed_progress)
+                    return
+                error = completed_progress.get("error", "No ACL response")
+                status_var.set("Machine response error: {}. Restart calibration or retry the Z read.".format(error))
+                if on_failure:
+                    on_failure()
+
+            self._calibration_move_callback = after_command
+            self._emit("calibration_command", payload={"command": command, "settings": settings})
+
+        def close_dialog():
+            self._z_compensation_dialog = None
+            self._calibration_move_callback = None
+            dialog.destroy()
+
+        def save_completed_calibration_preference():
+            if not calibration["complete"]:
+                return
+            persisted_points = (
+                self.machine_settings.get("Z_BED_POINTS", [])
+                if save_calibration_var.get()
+                else []
+            )
+            EngineRoomModel.save_machine_settings(
+                {"Z_BED_POINTS": persisted_points},
+                keys=("Z_BED_POINTS",),
+            )
+
+        def start():
+            try:
+                board_w = float(width_var.get())
+                board_h = float(height_var.get())
+                edge_offset = float(edge_offset_var.get())
+                count = int(count_var.get())
+                if board_w <= 0 or board_h <= 0 or edge_offset < 0 or board_w <= 2 * edge_offset or board_h <= 2 * edge_offset or count not in (4, 9, 16, 25):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Z Compensation", "Enter positive board dimensions and select a supported point count.", parent=dialog)
+                return
+            side = int(count ** 0.5)
+            points.clear()
+            for row in range(side):
+                for col in range(side):
+                    points.append((
+                        edge_offset + (board_w - 2 * edge_offset) * col / (side - 1),
+                        edge_offset + (board_h - 2 * edge_offset) * row / (side - 1),
+                    ))
+            index["value"] = 0
+            self._z_bed_points = []
+            calibration["complete"] = False
+            calibration["save_after_restart"] = save_calibration_var.get()
+            save_calibration_checkbox.configure(state=tk.DISABLED)
+            if not calibration["save_after_restart"]:
+                # Clear a previous persistent calibration so an interrupted run
+                # with saving disabled cannot restore stale bed measurements.
+                EngineRoomModel.save_machine_settings({"Z_BED_POINTS": []}, keys=("Z_BED_POINTS",))
+            status_var.set("Reading current Z before moving to the first point…")
+            send_calibration_command("OC; OZ;", visit_point)
+
+        def visit_point(_completed_progress=None):
+            i = index["value"]
+            if i >= len(points):
+                status_var.set("Calibration complete. {} points recorded.".format(len(points)))
+                self.machine_settings["Z_BED_POINTS"] = list(self._z_bed_points)
+                persisted_points = self._z_bed_points if calibration["save_after_restart"] else []
+                EngineRoomModel.save_machine_settings(
+                    {"Z_BED_POINTS": persisted_points},
+                    keys=("Z_BED_POINTS",),
+                )
+                calibration["complete"] = True
+                save_calibration_checkbox.configure(state=tk.NORMAL)
+                return
+            x, y = points[i]
+            settings = self._read_machine_settings(update_status=False)
+            if settings is None:
+                return
+            target_x_steps = x * settings["STEPSXY_PER_MM"]
+            target_y_steps = y * settings["STEPSXY_PER_MM"]
+            safe = settings["Z_SAFE_HEIGHT"] * settings["STEPSZ_PER_MM"]
+            confirm_button.configure(state=tk.DISABLED)
+            status_var.set("Moving to point {} / {} at X {:.2f}, Y {:.2f} mm…".format(i + 1, len(points), x, y))
+
+            def arrived(_completed_progress=None):
+                confirm_button.configure(state=tk.NORMAL)
+                status_var.set("Point {} / {} at X {:.2f}, Y {:.2f} mm. Lower Z manually, then confirm to continue.".format(i + 1, len(points), x, y))
+
+            # ACL XY coordinates are sent in motor steps: 1 mm = 39.37 steps.
+            # The move task's response is the only arrival signal; XY is not polled
+            # or compared against the target.
+            command = "MZ -{:.3f}; MA {:.3f}, {:.3f};".format(
+                safe,
+                target_x_steps,
+                target_y_steps,
+            )
+            # The task reads position once after MA. Give the controller time to
+            # finish the physical move before its response is expected.
+            send_calibration_command(command, arrived, command_timeout=30.0)
+
+        def record_confirmed_height(completed_progress=None):
+            if not points or index["value"] >= len(points):
+                return
+            if not completed_progress or completed_progress.get("status") != "sent":
+                status_var.set("Could not read machine position. Check the connection and try again.")
+                confirm_button.configure(state=tk.NORMAL)
+                return
+            machine_position = completed_progress.get("machine_position") or {}
+            position = machine_position.get("Z", machine_position.get("z"))
+            try:
+                z_steps = float(position) * float(self.machine_settings.get("STEPSZ_PER_MM", 1))
+            except (TypeError, ValueError):
+                messagebox.showerror("Z Compensation", "Current Z position is not available. Wait for the position display to update.", parent=dialog)
+                confirm_button.configure(state=tk.NORMAL)
+                return
+            x, y = points[index["value"]]
+            self._z_bed_points.append({"x": x, "y": y, "z_steps": z_steps})
+            index["value"] += 1
+            visit_point()
+
+        def confirm_point():
+            if not points or index["value"] >= len(points):
+                return
+            confirm_button.configure(state=tk.DISABLED)
+            status_var.set("Reading current Z position from the machine…")
+            send_calibration_command(
+                "OC; OZ;",
+                record_confirmed_height,
+                on_failure=lambda: confirm_button.configure(state=tk.NORMAL),
+            )
+
+        buttons = ttk.Frame(content)
+        buttons.grid(row=6, column=0, columnspan=2, sticky="e")
+        ttk.Button(buttons, text="Start / restart", command=start).grid(row=0, column=0, padx=(0, 8))
+        confirm_button = ttk.Button(buttons, text="Confirm height / next point", command=confirm_point, state=tk.DISABLED)
+        confirm_button.grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=close_dialog).grid(row=0, column=2)
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dialog.grab_set()
+        dialog.update_idletasks()
+        x = parent.winfo_rootx() + max((parent.winfo_width() - dialog.winfo_width()) // 2, 0)
+        y = parent.winfo_rooty() + max((parent.winfo_height() - dialog.winfo_height()) // 2, 0)
+        dialog.geometry("+{}+{}".format(x, y))
+
+    def _close_z_compensation_dialog(self):
+        dialog = self._z_compensation_dialog
+        self._z_compensation_dialog = None
+        self._calibration_move_callback = None
+        if dialog is not None:
+            try:
+                if dialog.winfo_exists():
+                    dialog.destroy()
+            except tk.TclError:
+                pass
 
     def open_serial_settings_dialog(self, parent=None):
         if self._serial_settings_dialog is not None:
@@ -1175,6 +1399,19 @@ class EngineRoomPage(Base):
         self._render()
         return {"settings": settings}
 
+    def _set_origin(self, event):
+        settings = self._read_machine_settings()
+        if settings is None:
+            self._render()
+            return None
+        if self.simulation_mode:
+            self.machine_status = "Simulation"
+            self._render()
+            return {"settings": settings, "simulation_mode": True}
+        self.machine_status = "Set origin"
+        self._render()
+        return {"settings": settings}
+
     def _jog(self, axis, direction):
         settings = self._read_machine_settings()
         if settings is None:
@@ -1248,6 +1485,16 @@ class EngineRoomPage(Base):
         elif line_index is not None:
             self.machine_status = "Sending"
         self._refresh_execution_progress()
+        if self.machine_progress.get("done") and self._calibration_move_callback:
+            callback = self._calibration_move_callback
+            completed_progress = dict(self.machine_progress)
+            self._calibration_move_callback = None
+            try:
+                # The controller guards task IDs when a callback immediately
+                # dispatches the next command, so run the completion handler now.
+                callback(completed_progress)
+            except tk.TclError:
+                pass
 
     def _can_send_to_machine(self):
         settings = self._read_machine_settings()
@@ -1468,7 +1715,11 @@ class EngineRoomPage(Base):
 
         idle_statuses = ("Idle", "Ready", "Complete", "Stopped", "Initialized", "Sim Jog", "Jogging")
 
-        if not self.simulation_mode and self.machine_status in idle_statuses:
+        if (
+            self._z_compensation_dialog is None
+            and not self.simulation_mode
+            and self.machine_status in idle_statuses
+        ):
             settings = self._read_machine_settings()
             if settings is not None:
                 self._emit("machine_get_position", event={"settings": settings})

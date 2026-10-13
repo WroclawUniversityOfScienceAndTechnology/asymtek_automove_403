@@ -2,9 +2,10 @@
 
 import argparse
 import os
-import signal
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import src
 
@@ -17,8 +18,8 @@ OUT = SCRIPT_DIR + "/out"
 UT_DIR = REPO_DIR + "/tests/ut"
 IT_DIR = REPO_DIR + "/tests/it"
 CELERY_WORKER_COMMAND = [
-    "poetry",
-    "run",
+    sys.executable,
+    "-m",
     "celery",
     "-A",
     "src.backend.celery_app",
@@ -215,7 +216,7 @@ def stop_celery_worker(worker):
     if worker.poll() is not None:
         return
 
-    worker.send_signal(signal.SIGTERM)
+    worker.terminate()
     try:
         worker.wait(timeout=10)
     except subprocess.TimeoutExpired:
@@ -224,11 +225,19 @@ def stop_celery_worker(worker):
 
 
 def run_program():
-    celery_worker = start_celery_worker()
+    # Give each app run an isolated filesystem broker. Old unconsumed RPC
+    # replies can otherwise make Kombu scan and sort thousands of stale files.
+    broker_dir = tempfile.mkdtemp(prefix="asymtek-celery-")
+    os.environ["ASYMTEK_CELERY_BROKER_DIR"] = broker_dir
+    celery_worker = None
     try:
+        celery_worker = start_celery_worker()
         src.main()
     finally:
-        stop_celery_worker(celery_worker)
+        if celery_worker is not None:
+            stop_celery_worker(celery_worker)
+        os.environ.pop("ASYMTEK_CELERY_BROKER_DIR", None)
+        shutil.rmtree(broker_dir, ignore_errors=True)
 
 
 def main():

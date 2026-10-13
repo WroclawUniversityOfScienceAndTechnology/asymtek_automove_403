@@ -121,7 +121,9 @@ def send_acl_command_task(command, settings=None):
     try:
         with open_serial_connection(settings=settings) as serial_connection:
             send_acl_command(serial_connection, command)
-            if "OA;" in command and "OZ;" in command:
+            if "OC;" in command and "OZ;" in command:
+                machine_position = read_machine_position(serial_connection, settings=settings)
+            elif "OA;" in command and "OZ;" in command:
                 machine_position = read_machine_position(serial_connection, settings=settings)
             else:
                 machine_position = query_machine_position(serial_connection, settings=settings)
@@ -132,6 +134,7 @@ def send_acl_command_task(command, settings=None):
         "command": command,
         "machine_position": machine_position,
     }
+
 
 @app.task(name="machine.jog")
 def jog_task(axis, distance_mm, settings=None):

@@ -64,6 +64,14 @@ class MachineTaskDispatcher:
         )
         return task.id
 
+    def set_origin(self, payload):
+        settings = payload.get("settings", {})
+        task = self._load_tasks().send_acl_command_task.delay(
+            "SO;",
+            settings=settings
+        )
+        return task.id
+
     def get_task_progress(self, task_id):
         if not task_id:
             return None

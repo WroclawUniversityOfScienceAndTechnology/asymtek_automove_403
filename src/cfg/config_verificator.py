@@ -49,6 +49,7 @@ class ConfigVerificator:
         "jog_distance_mm": _is_positive_number,
         "SERIAL_PORT": lambda value: isinstance(value, str) and bool(value.strip()),
         "BAUD_RATE": lambda value: isinstance(value, int) and not isinstance(value, bool) and value > 0,
+        "Z_BED_POINTS": lambda value: isinstance(value, list) and all(isinstance(point, dict) and all(isinstance(point.get(key), (int, float)) for key in ("x", "y", "z_steps")) for point in value),
     }
 
     section_mappings = {
@@ -74,6 +75,7 @@ class ConfigVerificator:
         "jog_distance_mm": "USER",
         "SERIAL_PORT": "USER",
         "BAUD_RATE": "USER",
+        "Z_BED_POINTS": "USER",
     }
 
     @classmethod
