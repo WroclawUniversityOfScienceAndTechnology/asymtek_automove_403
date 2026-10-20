@@ -192,13 +192,37 @@ def generate_acl_from_layer(layer, settings=None):
         commands.append(f"MZ {dz_init:.3f};")
         current_z = target_z_safe
 
-    for obj in layer.objects:
-        if type(obj).__name__ != "Flash":
-            continue
+    # Gerber object order follows file layout, which can cause long, erratic
+    # traversals. Greedily choose the nearest remaining dispense point, starting
+    # from the assumed machine origin. The original order breaks distance ties.
+    flashes = [
+        obj
+        for obj in layer.objects
+        if type(obj).__name__ == "Flash" and get_aperture_area(obj.aperture) > 0
+    ]
+    ordered_flashes = []
+    nearest_x = 0.0
+    nearest_y = 0.0
+    while flashes:
+        next_index = min(
+            range(len(flashes)),
+            key=lambda index: (
+                (flashes[index].x - nearest_x) ** 2
+                + (flashes[index].y - nearest_y) ** 2,
+                index,
+            ),
+        )
+        obj = flashes.pop(next_index)
+        ordered_flashes.append(obj)
+        nearest_x = obj.x
+        nearest_y = obj.y
 
+    # The command-generation loop below updates current_x/current_y in steps.
+    current_x = 0.0
+    current_y = 0.0
+
+    for obj in ordered_flashes:
         area = get_aperture_area(obj.aperture)
-        if area <= 0:
-            continue
 
         # Target positions for the given point from the Gerber file (in steps)
         target_x = obj.x * stepsxy_per_mm
