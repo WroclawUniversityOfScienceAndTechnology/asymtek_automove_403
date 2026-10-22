@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # pylint: disable=C0114, W0613
+import math
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -28,6 +29,7 @@ class EngineRoomPage(Base):
         self.program_name = "ACL CNC"
         self.machine_status = "Idle"
         self.active_file = "No Gerber loaded"
+        self.gerber_path = None
         self.extruder_percent = 100
         self.progress_percent = 0
         self.current_line = 0
@@ -40,6 +42,8 @@ class EngineRoomPage(Base):
         self._simulation_interval_ms = 300
         self._embedded_widgets = []
         self._machine_setting_entries = {}
+        self._nozzle_cleaning_time_entry = None
+        self.nozzle_cleaning_time = 1.0
         self._machine_position_text_items = {}
         self._serial_settings_dialog = None
         self._z_compensation_dialog = None
@@ -120,6 +124,7 @@ class EngineRoomPage(Base):
                 pass
         self._embedded_widgets = []
         self._machine_setting_entries = {}
+        self._nozzle_cleaning_time_entry = None
         self._clear_dynamic_render_refs()
         super().delete_canvas_items()
 
@@ -325,12 +330,24 @@ class EngineRoomPage(Base):
 
     def _add_file_panel(self):
         self._panel(24, 112, 360, 280, "Program")
-        self._button(52, 178, 304, 62, "Load Gerber", "load_gerber", callback=self._load_gerber)
+        self._button(52, 170, 304, 48, "Load Gerber", "load_gerber", callback=self._load_gerber)
         self._button(
             52,
-            258,
+            226,
             304,
-            62,
+            48,
+            "Reload Gerber",
+            "load_gerber",
+            fill="#0b6e99",
+            outline="#0b6e99",
+            callback=self._reload_gerber,
+            emit_on_none=False,
+        )
+        self._button(
+            52,
+            282,
+            304,
+            44,
             "Save Program",
             "save_program",
             fill="#40536d",
@@ -340,7 +357,7 @@ class EngineRoomPage(Base):
         self._add_active_file_path()
 
     def _add_active_file_path(self):
-        self._rect(52, 326, 356, 370, fill="#ffffff", outline="#cad5e3", width=1)
+        self._rect(52, 336, 356, 378, fill="#ffffff", outline="#cad5e3", width=1)
         path_frame = tk.Frame(self.canvas, bg="#ffffff")
         path_label = tk.Label(
             path_frame,
@@ -355,7 +372,7 @@ class EngineRoomPage(Base):
             wraplength=self._scaled(292),
         )
         path_label.pack(fill=tk.BOTH, expand=True)
-        self._window(58, 330, 292, 36, path_frame, anchor=tk.NW)
+        self._window(58, 339, 292, 36, path_frame, anchor=tk.NW)
 
     def _add_control_panel(self):
         self._panel(24, 410, 360, 622, "Machine Control")
@@ -642,6 +659,28 @@ class EngineRoomPage(Base):
             "machine_jog_z_minus",
             fill="#40536d",
             callback=lambda event: self._jog("Z", -1),
+            emit_on_none=False,
+        )
+        self._text(902, 870, "Nozzle cleaning", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
+        self._text(902, 920, "Open time (s)", fill="#172033", font=(self.default_font or "Helvetica", 13, "bold"))
+        self._nozzle_cleaning_time_entry = tk.Entry(
+            self.canvas,
+            font=self._font((self.default_font or "Helvetica", 13)),
+            justify=tk.CENTER,
+        )
+        self._nozzle_cleaning_time_entry.insert(0, str(self.nozzle_cleaning_time))
+        self._window(1030, 910, 84, 34, self._nozzle_cleaning_time_entry, anchor=tk.NW)
+        self._button(
+            1126,
+            902,
+            168,
+            50,
+            "Nozzle Cleaning",
+            "nozzle_cleaning",
+            fill="#40536d",
+            outline="#40536d",
+            font=(self.default_font or "Helvetica", 12, "bold"),
+            callback=self._nozzle_cleaning,
             emit_on_none=False,
         )
         self._add_machine_position_row(y=966)
@@ -1440,6 +1479,41 @@ class EngineRoomPage(Base):
             "settings": settings,
         }
 
+    def _nozzle_cleaning(self, event):
+        settings = self._read_machine_settings()
+        if settings is None:
+            self._render()
+            return None
+        try:
+            duration_sec = float(self._nozzle_cleaning_time_entry.get().strip().replace(",", "."))
+            if not math.isfinite(duration_sec) or duration_sec <= 0:
+                raise ValueError
+        except (AttributeError, ValueError):
+            self.machine_status = "Invalid valve time"
+            self._render()
+            return None
+        self.nozzle_cleaning_time = duration_sec
+        if self.simulation_mode:
+            self.machine_status = "Simulation"
+            self._render()
+            return None
+        serial_error = get_serial_preflight_error(settings)
+        if serial_error:
+            self.machine_status = "Machine offline"
+            self._render()
+            return None
+        self.machine_status = "Cleaning nozzle"
+        self._render()
+        return {
+            "execution_lines": [
+                "CD2;",
+                "WA {:.3f};".format(duration_sec),
+                "CD0; OA; OZ;",
+            ],
+            "line_index": 0,
+            "settings": settings,
+        }
+
     def _current_command_payload(self):
         command = None
         if self.execution_lines:
@@ -1520,33 +1594,45 @@ class EngineRoomPage(Base):
             filetypes=[("Gerber files", "*.gbr *.ger *.gtl *.gbl"), ("All files", "*.*")],
         )
         if path:
-            settings = self._read_machine_settings()
-            if settings is None:
-                self._render()
-                return None
-            try:
-                self.execution_lines = generate_acl_from_gerber(path, settings=settings)
-            except Exception as exc:  # pylint: disable=W0718
-                self.machine_status = "Load failed"
-                self.execution_lines = [str(exc)]
-                self.current_line = 0
-                self.selected_line = 0
-                self.progress_percent = 0
-                self._render()
-                return None
-            self.active_file = path
-            self.machine_status = "Ready"
+            return self._generate_gerber_program(path)
+        return None
+
+    def _reload_gerber(self, event):
+        if not self.gerber_path:
+            self.machine_status = "No Gerber loaded"
+            self._render()
+            return None
+        return self._generate_gerber_program(self.gerber_path)
+
+    def _generate_gerber_program(self, path):
+        settings = self._read_machine_settings()
+        if settings is None:
+            self._render()
+            return None
+        try:
+            execution_lines = generate_acl_from_gerber(path, settings=settings)
+        except Exception as exc:  # pylint: disable=W0718
+            self.machine_status = "Load failed"
+            self.execution_lines = [str(exc)]
             self.current_line = 0
             self.selected_line = 0
             self.progress_percent = 0
             self._render()
-            return {
-                "active_file": self.active_file,
-                "execution_lines": self.execution_lines,
-                "settings": settings,
-                "simulation_mode": self.simulation_mode,
-            }
-        return None
+            return None
+        self.gerber_path = path
+        self.active_file = path
+        self.execution_lines = execution_lines
+        self.machine_status = "Ready"
+        self.current_line = 0
+        self.selected_line = 0
+        self.progress_percent = 0
+        self._render()
+        return {
+            "active_file": self.active_file,
+            "execution_lines": self.execution_lines,
+            "settings": settings,
+            "simulation_mode": self.simulation_mode,
+        }
 
     def _save_program(self, event):
         path = filedialog.asksaveasfilename(

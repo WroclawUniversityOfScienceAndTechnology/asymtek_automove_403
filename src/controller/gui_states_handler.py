@@ -251,6 +251,9 @@ class GuiStatesHandler:
         elif event_name == "calibration_command":
             task_id = self.machine_dispatcher.send_current_command(payload)
             self._start_machine_progress_poll(task_id)
+        elif event_name == "nozzle_cleaning":
+            task_id = self.machine_dispatcher.start_program(payload)
+            self._start_machine_progress_poll(task_id)
         elif event_name == "machine_init":
             task_id = self.machine_dispatcher.init_machine(payload)
             self._start_machine_progress_poll(task_id)
@@ -356,6 +359,7 @@ class GuiStatesHandler:
             "machine_home",
             "set_origin",
             "calibration_command",
+            "nozzle_cleaning",
             "machine_get_position",
             *MACHINE_JOG_EVENTS,
         ):
