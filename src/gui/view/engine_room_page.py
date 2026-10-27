@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from src.backend.machine_management import (
+    fit_fiducial_transform,
     generate_acl_from_gerber,
     get_serial_preflight_error,
     list_serial_ports,
@@ -47,6 +48,9 @@ class EngineRoomPage(Base):
         self._machine_position_text_items = {}
         self._serial_settings_dialog = None
         self._z_compensation_dialog = None
+        self._xy_fiducial_dialog = None
+        self.xy_calibration_active = False
+        self.xy_transform = None
         self._calibration_move_callback = None
         self._status_text_item = None
         self._progress_bar_item = None
@@ -101,6 +105,7 @@ class EngineRoomPage(Base):
     def finish(self):
         self._close_serial_settings_dialog()
         self._close_z_compensation_dialog()
+        self._close_xy_fiducial_calibration_dialog()
         self._cancel_machine_settings_autosave()
         self._cancel_simulation()
         self._cancel_position_poll()
@@ -945,6 +950,237 @@ class EngineRoomPage(Base):
             except tk.TclError:
                 pass
 
+    def open_xy_fiducial_calibration_dialog(self, parent=None):
+        """Guide the operator through origin setup and manual XY fiducial alignment."""
+        if self._xy_fiducial_dialog is not None:
+            try:
+                self._xy_fiducial_dialog.lift()
+                self._xy_fiducial_dialog.focus_force()
+                return
+            except tk.TclError:
+                self._xy_fiducial_dialog = None
+        parent = parent or self.canvas.winfo_toplevel()
+        dialog = tk.Toplevel(parent)
+        self._xy_fiducial_dialog = dialog
+        dialog.title("XY fiducial calibration")
+        dialog.resizable(False, False)
+        dialog.transient(parent)
+        content = ttk.Frame(dialog, padding=16)
+        content.grid(row=0, column=0, sticky="nsew")
+        count_var = tk.StringVar(value="2")
+        ttk.Label(content, text="Fiducials").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=5)
+        count_combo = ttk.Combobox(content, textvariable=count_var, values=("2", "3", "4"), state="readonly", width=6)
+        count_combo.grid(row=0, column=1, sticky="w", pady=5)
+        ttk.Label(content, text="Set origin on the machine panel before calibration. Enter fiducial coordinates in mm.", wraplength=500).grid(
+            row=1, column=0, columnspan=4, sticky="w", pady=(4, 10)
+        )
+        x_var, y_var = tk.StringVar(), tk.StringVar()
+        ttk.Label(content, text="X (mm)").grid(row=2, column=0, sticky="e", padx=4, pady=5)
+        ttk.Entry(content, textvariable=x_var, width=12).grid(row=2, column=1, sticky="w", pady=5)
+        ttk.Label(content, text="Y (mm)").grid(row=2, column=2, sticky="e", padx=4, pady=5)
+        ttk.Entry(content, textvariable=y_var, width=12).grid(row=2, column=3, sticky="w", pady=5)
+        status_var = tk.StringVar(value="Enter fiducial 1 coordinates, then choose Go to fiducial.")
+        ttk.Label(content, textvariable=status_var, wraplength=500).grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 8))
+        points = []
+        state = {
+            "index": 0,
+            "count": None,
+            "z_mm": None,
+            "z_reference_mm": None,
+            "safe_z_target_mm": None,
+            "busy": False,
+            "point_ready": False,
+            "complete": False,
+        }
+
+        def close_dialog():
+            if self._xy_fiducial_dialog is dialog:
+                self._xy_fiducial_dialog = None
+                self.xy_calibration_active = False
+                self._calibration_move_callback = None
+            dialog.destroy()
+
+        def read_settings():
+            settings = self._read_machine_settings(update_status=False)
+            if settings is None:
+                status_var.set("Check machine settings before continuing.")
+                return None
+            if self.simulation_mode:
+                status_var.set("Turn off simulation mode to move the real machine.")
+                return None
+            error = get_serial_preflight_error(settings)
+            if error:
+                status_var.set("Machine connection error: {}".format(error))
+                return None
+            return settings
+
+        def dispatch(command, on_success, timeout=30.0):
+            settings = read_settings()
+            if settings is None or state["busy"]:
+                return
+            settings["COMMAND_TIMEOUT_SEC"] = timeout
+            state["busy"] = True
+
+            def completed(progress):
+                if not dialog.winfo_exists() or self._xy_fiducial_dialog is not dialog:
+                    return
+                state["busy"] = False
+                if progress.get("status") != "sent":
+                    status_var.set("Machine error: {}. Retry the last step.".format(progress.get("error", "No ACL response")))
+                    return
+                position = progress.get("machine_position") or {}
+                try:
+                    state["z_mm"] = float(position.get("z", position.get("Z")))
+                except (TypeError, ValueError):
+                    pass
+                on_success(progress)
+
+            self._calibration_move_callback = completed
+            self._emit("calibration_command", payload={"command": command, "settings": settings})
+
+        def go_to_fiducial():
+            if not self.gerber_path:
+                messagebox.showerror("XY calibration", "Load a Gerber file before calibrating fiducials.", parent=dialog)
+                return
+            try:
+                count = int(count_var.get())
+                x_mm = float(x_var.get().replace(",", "."))
+                y_mm = float(y_var.get().replace(",", "."))
+                if count not in (2, 3, 4) or not math.isfinite(x_mm) or not math.isfinite(y_mm):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("XY calibration", "Enter valid X and Y coordinates for this fiducial.", parent=dialog)
+                return
+
+            if state["complete"] or state["count"] != count:
+                points.clear()
+                state["index"] = 0
+                state["count"] = count
+                state["complete"] = False
+                state["z_reference_mm"] = None
+                state["safe_z_target_mm"] = None
+                if self.xy_transform is not None:
+                    self.xy_transform = None
+                    self._generate_gerber_program(self.gerber_path)
+            # A retry replaces the active nominal point and discards later samples.
+            del points[state["index"]:]
+            points.append({"x": x_mm, "y": y_mm})
+            state["point_ready"] = False
+            self.xy_calibration_active = True
+            index = state["index"]
+            settings = read_settings()
+            if settings is None:
+                return
+
+            status_var.set("Moving safely to fiducial {} / {} at X {:.3f}, Y {:.3f} mm…".format(index + 1, count, x_mm, y_mm))
+
+            def move_after_position_read(progress):
+                position = progress.get("machine_position") or {}
+                try:
+                    current_z_mm = float(position.get("z", position.get("Z")))
+                except (TypeError, ValueError):
+                    status_var.set("Current Z position is unavailable. Check the machine panel and retry.")
+                    return
+                if state["z_reference_mm"] is None:
+                    state["z_reference_mm"] = current_z_mm
+                    state["safe_z_target_mm"] = current_z_mm - float(settings["Z_SAFE_HEIGHT"])
+                z_delta_steps = (
+                    state["safe_z_target_mm"] - current_z_mm
+                ) * float(settings["STEPSZ_PER_MM"])
+                target_x = x_mm * float(settings["STEPSXY_PER_MM"])
+                target_y = y_mm * float(settings["STEPSXY_PER_MM"])
+                z_command = "MZ {:.3f}; ".format(z_delta_steps) if abs(z_delta_steps) > 1e-6 else ""
+                command = "{}MA {:.3f}, {:.3f};".format(z_command, target_x, target_y)
+                dispatch(command, lambda _result: arrived(index, x_mm, y_mm), timeout=30.0)
+
+            # OC reports coordinates in the operator-set origin. OA reports
+            # raw microsteps from machine home, so it would add the board's
+            # distance from home to the fitted XY translation.
+            dispatch("OC; OZ;", move_after_position_read, timeout=5.0)
+
+        def arrived(index, x_mm, y_mm):
+            state["point_ready"] = True
+            status_var.set("Fiducial {} / {}: use the machine panel to position XY over its center, then choose Save fiducial.".format(index + 1, state["count"]))
+
+        def record_point():
+            if state["busy"] or not state["point_ready"] or state["index"] >= len(points):
+                return
+            status_var.set("Reading machine coordinates for fiducial {}…".format(state["index"] + 1))
+
+            def recorded(progress):
+                position = progress.get("machine_position") or {}
+                try:
+                    points[state["index"]]["machine_x"] = float(position.get("x", position.get("X")))
+                    points[state["index"]]["machine_y"] = float(position.get("y", position.get("Y")))
+                except (TypeError, ValueError):
+                    status_var.set("XY position unavailable. Check the machine position readout and retry.")
+                    return
+                state["index"] += 1
+                state["point_ready"] = False
+                if state["index"] < state["count"]:
+                    x_var.set("")
+                    y_var.set("")
+                    status_var.set("Fiducial saved. Enter fiducial {} / {} coordinates, then choose Go to fiducial.".format(
+                        state["index"] + 1, state["count"]
+                    ))
+                    return
+                try:
+                    transform = fit_fiducial_transform(points)
+                except ValueError as exc:
+                    status_var.set("Calibration could not be calculated: {}".format(exc))
+                    return
+                self.xy_transform = transform
+                generated_program = self._generate_gerber_program(self.gerber_path)
+                state["complete"] = True
+                angle_deg = math.degrees(transform["angle_rad"])
+                if generated_program is None:
+                    status_var.set(
+                        "Calibration complete. Rotation {:+.4f}°, translation X {:+.3f} mm, Y {:+.3f} mm; Gerber commands could not be regenerated.".format(
+                            angle_deg,
+                            transform["offset_x_mm"],
+                            transform["offset_y_mm"],
+                        )
+                    )
+                else:
+                    status_var.set(
+                        "Calibration complete. Rotation {:+.4f}°, translation X {:+.3f} mm, Y {:+.3f} mm. Machine commands regenerated.".format(
+                            angle_deg,
+                            transform["offset_x_mm"],
+                            transform["offset_y_mm"],
+                        )
+                    )
+
+            dispatch("OC; OZ;", recorded, timeout=5.0)
+
+        buttons = ttk.Frame(content)
+        buttons.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        for label, command in (
+            ("Go to fiducial", go_to_fiducial),
+            ("Save fiducial", record_point),
+            ("Close", close_dialog),
+        ):
+            ttk.Button(buttons, text=label, command=command).pack(
+                side=tk.LEFT, expand=True, fill=tk.X, padx=6
+            )
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dialog.grab_set()
+        dialog.update_idletasks()
+        x = parent.winfo_rootx() + max((parent.winfo_width() - dialog.winfo_width()) // 2, 0)
+        y = parent.winfo_rooty() + max((parent.winfo_height() - dialog.winfo_height()) // 2, 0)
+        dialog.geometry("+{}+{}".format(x, y))
+
+    def _close_xy_fiducial_calibration_dialog(self):
+        dialog = self._xy_fiducial_dialog
+        self._xy_fiducial_dialog = None
+        self.xy_calibration_active = False
+        self._calibration_move_callback = None
+        if dialog is not None:
+            try:
+                if dialog.winfo_exists():
+                    dialog.destroy()
+            except tk.TclError:
+                pass
+
     def open_serial_settings_dialog(self, parent=None):
         if self._serial_settings_dialog is not None:
             try:
@@ -1605,12 +1841,18 @@ class EngineRoomPage(Base):
         return self._generate_gerber_program(self.gerber_path)
 
     def _generate_gerber_program(self, path):
+        if path != self.gerber_path:
+            self.xy_transform = None
         settings = self._read_machine_settings()
         if settings is None:
             self._render()
             return None
         try:
-            execution_lines = generate_acl_from_gerber(path, settings=settings)
+            execution_lines = generate_acl_from_gerber(
+                path,
+                settings=settings,
+                xy_transform=self.xy_transform,
+            )
         except Exception as exc:  # pylint: disable=W0718
             self.machine_status = "Load failed"
             self.execution_lines = [str(exc)]
@@ -1803,6 +2045,7 @@ class EngineRoomPage(Base):
 
         if (
             self._z_compensation_dialog is None
+            and self._xy_fiducial_dialog is None
             and not self.simulation_mode
             and self.machine_status in idle_statuses
         ):

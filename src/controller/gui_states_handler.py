@@ -62,6 +62,7 @@ class GuiStatesHandler:
         self.state_machine = state_machine
         self.machine_dispatcher = MachineTaskDispatcher()
         self._machine_task_id = None
+        self._xy_calibration_task_id = None
         self._machine_progress_after_id = None
         self._machine_progress_interval_ms = 250
 
@@ -118,6 +119,11 @@ class GuiStatesHandler:
         page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
         if page is not None:
             page.open_z_compensation_dialog(parent=parent)
+
+    def open_xy_fiducial_calibration(self, parent=None):
+        page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
+        if page is not None:
+            page.open_xy_fiducial_calibration_dialog(parent=parent)
 
     def restore_default_machine_settings(self):
         settings = EngineRoomModel.restore_default_machine_settings()
@@ -250,6 +256,9 @@ class GuiStatesHandler:
                     self._poll_single_position_task(poll_task_id)
         elif event_name == "calibration_command":
             task_id = self.machine_dispatcher.send_current_command(payload)
+            page = self._engine_room_page()
+            if page is not None and page.xy_calibration_active:
+                self._xy_calibration_task_id = task_id
             self._start_machine_progress_poll(task_id)
         elif event_name == "nozzle_cleaning":
             task_id = self.machine_dispatcher.start_program(payload)
@@ -310,6 +319,8 @@ class GuiStatesHandler:
             return
 
         if progress and progress.get("done"):
+            if self._xy_calibration_task_id == polled_task_id:
+                self._xy_calibration_task_id = None
             self._machine_task_id = None
             return
         self._schedule_machine_progress_poll()

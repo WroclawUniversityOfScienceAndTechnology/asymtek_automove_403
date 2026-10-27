@@ -124,11 +124,11 @@ def list_serial_ports():
     return [port.device for port in list_ports.comports()]
 
 
-def generate_acl_from_layer(layer, settings=None):
+def generate_acl_from_layer(layer, settings=None, xy_transform=None):
     """
-    Generate ACL commands using exclusively relative positioning.
-    Assumes the dispensing head is physically located at the Origin (0,0,0) of the board
-    when the program starts.
+    Generate ACL commands using relative positioning after the initial XY move.
+    With fiducial calibration, the first XY move is absolute so the program can
+    start from the machine position left by the calibration workflow.
     Z-axis logic is adjusted natively to match the physical motor direction
     (negative Z values move the head UP, positive Z values move it DOWN).
     """
@@ -181,6 +181,7 @@ def generate_acl_from_layer(layer, settings=None):
     # Virtual starting positions (assuming 0,0,0 on the board)
     current_x = 0.0
     current_y = 0.0
+    first_xy_move = True
     current_z = 0.0
 
     # 1. SAFETY: First, raise the needle from 0,0,0 to the safe height
@@ -220,28 +221,45 @@ def generate_acl_from_layer(layer, settings=None):
     # The command-generation loop below updates current_x/current_y in steps.
     current_x = 0.0
     current_y = 0.0
+    previous_rotated_x_mm = None
+    previous_rotated_y_mm = None
 
     for obj in ordered_flashes:
         area = get_aperture_area(obj.aperture)
 
-        # Target positions for the given point from the Gerber file (in steps)
-        target_x = obj.x * stepsxy_per_mm
-        target_y = obj.y * stepsxy_per_mm
+        # Apply the translation to the first absolute point only. Subsequent
+        # relative moves use rotated Gerber deltas, so the translation cannot
+        # accumulate or affect the distance between pads.
+        if xy_transform:
+            rotated_x_mm, rotated_y_mm = _rotate_xy(obj.x, obj.y, xy_transform)
+            if first_xy_move:
+                target_x = (rotated_x_mm + float(xy_transform["offset_x_mm"])) * stepsxy_per_mm
+                target_y = (rotated_y_mm + float(xy_transform["offset_y_mm"])) * stepsxy_per_mm
+                commands.append(f"MR {target_x:.3f}, {target_y:.3f};")
+                current_x, current_y = target_x, target_y
+            else:
+                dx = (rotated_x_mm - previous_rotated_x_mm) * stepsxy_per_mm
+                dy = (rotated_y_mm - previous_rotated_y_mm) * stepsxy_per_mm
+                if dx != 0 or dy != 0:
+                    commands.append(f"MR {dx:.3f}, {dy:.3f};")
+                current_x += dx
+                current_y += dy
+            previous_rotated_x_mm, previous_rotated_y_mm = rotated_x_mm, rotated_y_mm
+            first_xy_move = False
+        else:
+            target_x = obj.x * stepsxy_per_mm
+            target_y = obj.y * stepsxy_per_mm
+            dx = target_x - current_x
+            dy = target_y - current_y
+            if dx != 0 or dy != 0:
+                commands.append(f"MR {dx:.3f}, {dy:.3f};")
+            current_x, current_y = target_x, target_y
+            first_xy_move = False
         dispense_time_sec = area * time_per_sqmm
 
         # Dispensing height
         # (Positive value because Z is inverted, so positive moves DOWN towards the board)
         target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(obj.x, obj.y)
-
-        # 2. Relative XY move (MR)
-        dx = target_x - current_x
-        dy = target_y - current_y
-
-        if dx != 0 or dy != 0:
-            commands.append(f"MR {dx:.3f}, {dy:.3f};")
-
-        current_x = target_x
-        current_y = target_y
 
         # 3. Relative Z lower (MZ) to dispensing height
         dz_down = target_z_dispense - current_z
@@ -275,7 +293,7 @@ def generate_acl_from_layer(layer, settings=None):
     return commands
 
 
-def generate_acl_from_gerber(gerber_path, settings=None):
+def generate_acl_from_gerber(gerber_path, settings=None, xy_transform=None):
     """
     Open a Gerber file and return generated ACL commands.
 
@@ -285,7 +303,67 @@ def generate_acl_from_gerber(gerber_path, settings=None):
     from gerbonara import GerberFile
 
     layer = GerberFile.open(gerber_path)
-    return generate_acl_from_layer(layer, settings=settings)
+    return generate_acl_from_layer(layer, settings=settings, xy_transform=xy_transform)
+
+
+def _rotate_xy(x_mm, y_mm, transform):
+    """Rotate a Gerber coordinate without applying its XY translation."""
+    angle = float(transform["angle_rad"])
+    cosine, sine = math.cos(angle), math.sin(angle)
+    return cosine * x_mm - sine * y_mm, sine * x_mm + cosine * y_mm
+
+
+def apply_xy_transform(x_mm, y_mm, transform):
+    """Map a Gerber coordinate to machine XY using rotation and translation."""
+    rotated_x, rotated_y = _rotate_xy(x_mm, y_mm, transform)
+    return (
+        rotated_x + float(transform["offset_x_mm"]),
+        rotated_y + float(transform["offset_y_mm"]),
+    )
+
+
+def fit_fiducial_transform(fiducials):
+    """Fit a rigid transform mapping Gerber fiducials to machine coordinates."""
+    if len(fiducials) < 2:
+        raise ValueError("At least two fiducials are required")
+    try:
+        source = [(float(point["x"]), float(point["y"])) for point in fiducials]
+        target = [(float(point["machine_x"]), float(point["machine_y"])) for point in fiducials]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Each fiducial needs finite Gerber and machine XY coordinates") from exc
+    if not all(math.isfinite(value) for pair in source + target for value in pair):
+        raise ValueError("Fiducial coordinates must be finite numbers")
+
+    source_x = sum(point[0] for point in source) / len(source)
+    source_y = sum(point[1] for point in source) / len(source)
+    target_x = sum(point[0] for point in target) / len(target)
+    target_y = sum(point[1] for point in target) / len(target)
+    dot = cross = 0.0
+    source_spread = target_spread = 0.0
+    for (sx, sy), (tx, ty) in zip(source, target):
+        sx, sy = sx - source_x, sy - source_y
+        tx, ty = tx - target_x, ty - target_y
+        dot += sx * tx + sy * ty
+        cross += sx * ty - sy * tx
+        source_spread += sx * sx + sy * sy
+        target_spread += tx * tx + ty * ty
+    if source_spread < 1e-12 or target_spread < 1e-12 or math.hypot(dot, cross) < 1e-12:
+        raise ValueError("Fiducial positions do not define a stable rotation")
+    angle = math.atan2(cross, dot)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    offset_x = target_x - (cosine * source_x - sine * source_y)
+    offset_y = target_y - (sine * source_x + cosine * source_y)
+    squared_error = 0.0
+    for (source_px, source_py), (target_px, target_py) in zip(source, target):
+        predicted_x = cosine * source_px - sine * source_py + offset_x
+        predicted_y = sine * source_px + cosine * source_py + offset_y
+        squared_error += (predicted_x - target_px) ** 2 + (predicted_y - target_py) ** 2
+    return {
+        "angle_rad": angle,
+        "offset_x_mm": offset_x,
+        "offset_y_mm": offset_y,
+        "rms_error_mm": math.sqrt(squared_error / len(fiducials)),
+    }
 
 
 def parse_acl_toolpath(commands, settings=None):

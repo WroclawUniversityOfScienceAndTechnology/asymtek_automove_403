@@ -57,6 +57,9 @@ class MainStateMachine(StateMachine):
     def open_z_compensation(self, parent=None):
         self.gui_states_handler.open_z_compensation(parent=parent)
 
+    def open_xy_fiducial_calibration(self, parent=None):
+        self.gui_states_handler.open_xy_fiducial_calibration(parent=parent)
+
     def restore_default_machine_settings(self):
         self.gui_states_handler.restore_default_machine_settings()
 

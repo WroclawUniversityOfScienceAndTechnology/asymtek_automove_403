@@ -1,15 +1,18 @@
+import math
 from types import SimpleNamespace
 
 import pytest
 
 from src.backend.machine_management import (
     ToolpathPoint,
+    apply_xy_transform,
     build_jog_command,
     build_serial_config,
     generate_acl_from_layer,
     get_acl_command_delay,
     get_serial_preflight_error,
     get_aperture_area,
+    fit_fiducial_transform,
     list_serial_ports,
     parse_acl_toolpath,
     query_machine_position,
@@ -62,6 +65,79 @@ def test_generate_acl_from_layer_uses_machine_settings():
         "AZ 50.000;",
         "MA 0, 0; AZ 50.000;",
     ]
+
+
+def test_fit_fiducial_transform_maps_gerber_points_to_machine_xy():
+    angle = math.radians(17)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    offset_x, offset_y = 12.5, -7.25
+    source = [(-8.0, 3.0), (11.0, -2.0), (4.0, 14.0)]
+    fiducials = []
+    for x, y in source:
+        fiducials.append({
+            "x": x,
+            "y": y,
+            "machine_x": cosine * x - sine * y + offset_x,
+            "machine_y": sine * x + cosine * y + offset_y,
+        })
+
+    transform = fit_fiducial_transform(fiducials)
+
+    assert transform["angle_rad"] == pytest.approx(angle)
+    assert transform["offset_x_mm"] == pytest.approx(offset_x)
+    assert transform["offset_y_mm"] == pytest.approx(offset_y)
+    assert transform["rms_error_mm"] == pytest.approx(0.0, abs=1e-12)
+    for point in fiducials:
+        assert apply_xy_transform(point["x"], point["y"], transform) == pytest.approx(
+            (point["machine_x"], point["machine_y"])
+        )
+
+
+def test_fit_fiducial_transform_with_two_fiducials():
+    angle = math.radians(-0.25)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    fiducials = []
+    for x, y in ((129.54, 5.08), (20.0, 45.0)):
+        fiducials.append({
+            "x": x,
+            "y": y,
+            "machine_x": cosine * x - sine * y + 32.49,
+            "machine_y": sine * x + cosine * y + 11.351,
+        })
+
+    transform = fit_fiducial_transform(fiducials)
+
+    assert transform["angle_rad"] == pytest.approx(angle)
+    assert transform["offset_x_mm"] == pytest.approx(32.49)
+    assert transform["offset_y_mm"] == pytest.approx(11.351)
+    assert transform["rms_error_mm"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_fit_fiducial_transform_rejects_coincident_points():
+    points = [
+        {"x": 1, "y": 1, "machine_x": 2, "machine_y": 2},
+        {"x": 1, "y": 1, "machine_x": 2, "machine_y": 2},
+    ]
+
+    with pytest.raises(ValueError, match="stable rotation"):
+        fit_fiducial_transform(points)
+
+
+def test_generate_acl_from_layer_applies_fiducial_translation():
+    layer = SimpleNamespace(objects=[Flash(1.5, 2.0, RectangleAperture(2.0, 3.0))])
+    transform = {
+        "angle_rad": 0.0,
+        "offset_x_mm": 5.0,
+        "offset_y_mm": -3.0,
+    }
+
+    commands = generate_acl_from_layer(
+        layer,
+        settings={"STEPSXY_PER_MM": 10.0},
+        xy_transform=transform,
+    )
+
+    assert "MA 65.000, -10.000;" in commands
 
 
 def test_build_serial_config_uses_asymtek_acl_framing():

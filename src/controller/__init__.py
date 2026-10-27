@@ -120,6 +120,7 @@ class MainController(tk.Tk):
 
         machine_menu.add_command(label="Serial settings", command=self._open_serial_settings)
         machine_menu.add_command(label="Z compensation", command=self._open_z_compensation)
+        machine_menu.add_command(label="XY fiducial calibration", command=self._open_xy_fiducial_calibration)
         machine_menu.add_command(
             label="Restore default machine parameters",
             command=self._restore_default_machine_settings,
@@ -145,6 +146,10 @@ class MainController(tk.Tk):
     def _open_z_compensation(self):
         if hasattr(self, "main_state_machine"):
             self.main_state_machine.open_z_compensation(self)
+
+    def _open_xy_fiducial_calibration(self):
+        if hasattr(self, "main_state_machine"):
+            self.main_state_machine.open_xy_fiducial_calibration(self)
 
     def _restore_default_machine_settings(self):
         if hasattr(self, "main_state_machine"):
