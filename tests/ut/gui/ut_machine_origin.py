@@ -39,6 +39,28 @@ def _complete(page, status="sent", position=None, **kwargs):
     page.apply_machine_progress({"done": True, "status": status, "machine_position": position, **kwargs})
 
 
+def test_init_shows_initializing_until_machine_and_origin_are_confirmed(origin_page):
+    page = origin_page
+    payload = page._machine_init(None)
+
+    assert payload == {"settings": page.machine_settings}
+    assert page.machine_status == "Initializing"
+    page.apply_machine_progress({"done": False, "state": "STARTED"})
+    assert page.machine_status == "Initializing"
+    _complete(page, event="machine_initialized", position={"x": 1, "y": 2, "z": 3})
+
+    assert page.machine_status == "Initialized"
+    assert page.machine_position == {"X": 1, "Y": 2, "Z": 3}
+
+
+def test_failed_init_does_not_show_initialized(origin_page):
+    page = origin_page
+    page._machine_init(None)
+    _complete(page, status="error", error="Initialization failed: No response")
+
+    assert page.machine_status == "Machine error"
+
+
 def test_set_origin_captures_absolute_position_and_persists_after_machine_reply(origin_page):
     page = origin_page
     page._set_origin(None)

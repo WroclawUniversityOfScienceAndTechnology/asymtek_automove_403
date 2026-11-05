@@ -1766,7 +1766,7 @@ class EngineRoomPage(Base):
             self.machine_status = "Simulation"
             self._render()
             return {"settings": settings, "simulation_mode": True}
-        self.machine_status = "Initialized"
+        self.machine_status = "Initializing"
         self._render()
         return {"settings": settings}
 
@@ -2015,7 +2015,10 @@ class EngineRoomPage(Base):
         elif status == "stopped":
             self.machine_status = "Stopped"
         elif self.machine_progress.get("done"):
-            self.machine_status = "Complete" if status == "sent" else "Machine done"
+            if status == "sent" and self.machine_progress.get("event") == "machine_initialized":
+                self.machine_status = "Initialized"
+            else:
+                self.machine_status = "Complete" if status == "sent" else "Machine done"
         elif line_index is not None:
             self.machine_status = "Sending"
         self._refresh_execution_progress()

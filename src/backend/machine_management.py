@@ -520,11 +520,8 @@ def open_serial_connection(settings=None):
     """
     import serial
 
-    origin_command = None
-    if settings and "MACHINE_ORIGIN" in settings:
-        origin_command = build_machine_origin_command(settings["MACHINE_ORIGIN"], settings)
     config = build_serial_config(settings=settings)
-    serial_connection = serial.Serial(
+    return serial.Serial(
         port=config.port,
         baudrate=config.baudrate,
         bytesize=serial.SEVENBITS,
@@ -534,15 +531,6 @@ def open_serial_connection(settings=None):
         timeout=config.timeout,
         write_timeout=config.write_timeout,
     )
-    if origin_command is not None:
-        try:
-            # Connections are opened per task, so this also restores the origin
-            # on the first communication after a cable reconnect or app restart.
-            send_acl_command_and_wait(serial_connection, origin_command + " OA; OZ;", settings=settings)
-        except Exception:
-            serial_connection.close()
-            raise
-    return serial_connection
 
 
 def get_serial_preflight_error(settings=None):

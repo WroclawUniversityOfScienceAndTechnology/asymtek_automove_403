@@ -54,8 +54,9 @@ The UI stores runtime configuration under `~/AppData/cfg/conf.ini`. Default asse
 and saves both coordinates in mm as `MACHINE_ORIGIN` in the local configuration after the machine responds.
 Use `Machine > Program origin` to edit those saved coordinates and choose **Save and send to machine**.
 `GO ORIGIN` restores the saved origin, raises Z by the configured safe height, and moves to program X/Y zero.
-The saved origin is also restored whenever a communication connection opens, including after a reconnect,
-and after `INIT` or `HOME`. Origin controls require machine mode.
+Press `INIT` after connecting the machine. The app waits for a successful initialization response
+before sending the saved origin, then waits for the origin command to complete before showing `Initialized`.
+Opening a communication connection or pressing `HOME` does not send the origin. Origin controls require machine mode.
 
 ## Screen Resolution
 

@@ -1,3 +1,4 @@
+import math
 import time
 
 from src.backend.celery_app import app
@@ -10,7 +11,9 @@ from src.backend.machine_control import (
     set_machine_control,
 )
 from src.backend.machine_management import (
+    AclMachineError,
     build_jog_command,
+    build_machine_origin_command,
     get_serial_preflight_error,
     open_serial_connection,
     send_acl_command,
@@ -108,6 +111,34 @@ def send_acl_program_task(self, commands, settings=None, start_index=0):
         "line_index": last_command["line_index"],
         "last_line_index": last_command["line_index"],
         "command": last_command["command"],
+        "machine_position": machine_position,
+    }
+
+
+@app.task(name="machine.initialize")
+def initialize_machine_task(settings=None):
+    """Wait for a successful INIT response before restoring the saved origin."""
+    serial_error = get_serial_preflight_error(settings)
+    if serial_error:
+        return _serial_error_result(serial_error)
+    settings = settings or {}
+    stage = "initialization"
+    try:
+        origin_command = None
+        if "MACHINE_ORIGIN" in settings:
+            origin_command = build_machine_origin_command(settings["MACHINE_ORIGIN"], settings) + " OA; OZ;"
+        with open_serial_connection(settings=settings) as serial_connection:
+            machine_position = send_acl_command_and_wait(serial_connection, "in; OA; OZ;", settings=settings)
+            if not all(math.isfinite(machine_position[axis]) for axis in ("x", "y", "z")):
+                raise AclMachineError("Invalid machine position in INIT response")
+            if origin_command is not None:
+                stage = "origin restore"
+                machine_position = send_acl_command_and_wait(serial_connection, origin_command, settings=settings)
+    except Exception as exc:  # pylint: disable=W0718
+        return _serial_error_result("{} failed: {}".format(stage.capitalize(), exc))
+    return {
+        "event": "machine_initialized",
+        "status": "sent",
         "machine_position": machine_position,
     }
 
