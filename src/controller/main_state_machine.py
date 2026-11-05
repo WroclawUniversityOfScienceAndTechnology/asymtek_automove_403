@@ -60,6 +60,9 @@ class MainStateMachine(StateMachine):
     def open_xy_fiducial_calibration(self, parent=None):
         self.gui_states_handler.open_xy_fiducial_calibration(parent=parent)
 
+    def open_program_origin(self, parent=None):
+        self.gui_states_handler.open_program_origin(parent=parent)
+
     def restore_default_machine_settings(self):
         self.gui_states_handler.restore_default_machine_settings()
 

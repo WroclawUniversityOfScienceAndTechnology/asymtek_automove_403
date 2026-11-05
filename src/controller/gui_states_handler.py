@@ -125,6 +125,11 @@ class GuiStatesHandler:
         if page is not None:
             page.open_xy_fiducial_calibration_dialog(parent=parent)
 
+    def open_program_origin(self, parent=None):
+        page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
+        if page is not None:
+            page.open_program_origin_dialog(parent=parent)
+
     def restore_default_machine_settings(self):
         settings = EngineRoomModel.restore_default_machine_settings()
         page = self.pages.get(GuiStates.ENGINE_ROOM_STATE)
@@ -222,7 +227,10 @@ class GuiStatesHandler:
         return True
 
     def _handle_machine_event(self, event_name, payload):
-        payload = payload or {}
+        # Canvas callbacks may return None (for example, when a file load
+        # fails). In that case the view's event field contains Tk's Event
+        # object, which is not a machine command payload.
+        payload = payload if isinstance(payload, dict) else {}
         if payload.get("simulation_mode"):
             Logger().log_info("Machine dispatch skipped for simulation event: " + event_name)
             return None

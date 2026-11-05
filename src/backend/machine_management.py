@@ -81,6 +81,35 @@ def get_aperture_area(aperture):
         if width > height:
             return (width - height) * height + math.pi * (radius**2)
         return width * (height - width) + math.pi * (radius**2)
+    if shape_name == "ApertureMacroInstance":
+        # Altium exports rotated rectangular pads as macro outlines. Their
+        # rotation is already represented by the outline vertices, so the
+        # shoelace area remains correct without approximating the bounding box.
+        area = 0.0
+        macro = getattr(aperture, "macro", None)
+        # Gerber macro primitives keep expressions such as $2 unresolved
+        # until they are evaluated with the aperture instance's parameters.
+        variable_binding = {
+            index: value for index, value in enumerate(aperture.parameters, start=1)
+        }
+        for primitive in getattr(macro, "primitives", ()):
+            if type(primitive).__name__ != "Outline":
+                continue
+            points = [
+                (x.calculate(variable_binding), y.calculate(variable_binding))
+                for x, y in primitive.points
+            ]
+            if len(points) < 4:
+                continue
+            polygon_area = abs(
+                sum(
+                    x1 * y2 - x2 * y1
+                    for (x1, y1), (x2, y2) in zip(points, points[1:])
+                )
+            ) / 2.0
+            exposure = primitive.exposure.calculate(variable_binding)
+            area += polygon_area if exposure > 0 else -polygon_area
+        return max(area, 0.0)
     return 0.0
 
 
@@ -124,7 +153,7 @@ def list_serial_ports():
     return [port.device for port in list_ports.comports()]
 
 
-def generate_acl_from_layer(layer, settings=None, xy_transform=None):
+def generate_acl_from_layer(layer, settings=None, xy_transform=None, mirror_x=False, origin_offset=None):
     """
     Generate ACL commands using relative positioning after the initial XY move.
     With fiducial calibration, the first XY move is absolute so the program can
@@ -137,6 +166,9 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None):
     z_offset_per_sec = machine_settings["Z_OFFSET_PER_SEC"]
     z_safe_height = machine_settings["Z_SAFE_HEIGHT"]
     stepsxy_per_mm = machine_settings["STEPSXY_PER_MM"]
+    origin_offset = origin_offset or {"x": 0.0, "y": 0.0}
+    origin_offset_x = float(origin_offset.get("x", 0.0))
+    origin_offset_y = float(origin_offset.get("y", 0.0))
     stepsz_per_mm = machine_settings["STEPSZ_PER_MM"]
     bed_points = (settings or {}).get("Z_BED_POINTS", [])
     reference_z = bed_points[0].get("z_steps", 0) if bed_points else 0
@@ -223,6 +255,11 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None):
     current_y = 0.0
     previous_rotated_x_mm = None
     previous_rotated_y_mm = None
+    mirror_center_x = (
+        (min(obj.x for obj in ordered_flashes) + max(obj.x for obj in ordered_flashes)) / 2.0
+        if mirror_x and ordered_flashes
+        else 0.0
+    )
 
     for obj in ordered_flashes:
         area = get_aperture_area(obj.aperture)
@@ -230,12 +267,18 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None):
         # Apply the translation to the first absolute point only. Subsequent
         # relative moves use rotated Gerber deltas, so the translation cannot
         # accumulate or affect the distance between pads.
+        source_x_mm = 2.0 * mirror_center_x - obj.x if mirror_x else obj.x
+        source_y_mm = obj.y
         if xy_transform:
-            rotated_x_mm, rotated_y_mm = _rotate_xy(obj.x, obj.y, xy_transform)
+            rotated_x_mm, rotated_y_mm = _rotate_xy(source_x_mm, source_y_mm, xy_transform)
             if first_xy_move:
-                target_x = (rotated_x_mm + float(xy_transform["offset_x_mm"])) * stepsxy_per_mm
-                target_y = (rotated_y_mm + float(xy_transform["offset_y_mm"])) * stepsxy_per_mm
-                commands.append(f"MR {target_x:.3f}, {target_y:.3f};")
+                target_x = (rotated_x_mm + float(xy_transform["offset_x_mm"]) + origin_offset_x) * stepsxy_per_mm
+                target_y = (rotated_y_mm + float(xy_transform["offset_y_mm"]) + origin_offset_y) * stepsxy_per_mm
+                # The first transformed coordinate is an absolute machine
+                # position. Treating it as relative adds the current head
+                # position to the calibrated board coordinate and shifts the
+                # entire toolpath.
+                commands.append(f"MA {target_x:.3f}, {target_y:.3f};")
                 current_x, current_y = target_x, target_y
             else:
                 dx = (rotated_x_mm - previous_rotated_x_mm) * stepsxy_per_mm
@@ -247,12 +290,17 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None):
             previous_rotated_x_mm, previous_rotated_y_mm = rotated_x_mm, rotated_y_mm
             first_xy_move = False
         else:
-            target_x = obj.x * stepsxy_per_mm
-            target_y = obj.y * stepsxy_per_mm
-            dx = target_x - current_x
-            dy = target_y - current_y
-            if dx != 0 or dy != 0:
-                commands.append(f"MR {dx:.3f}, {dy:.3f};")
+            target_x = (source_x_mm + origin_offset_x) * stepsxy_per_mm
+            target_y = (source_y_mm + origin_offset_y) * stepsxy_per_mm
+            if first_xy_move:
+                # Start from the Gerber coordinate origin even if the head's
+                # current position is not physically at (0, 0).
+                commands.append(f"MA {target_x:.3f}, {target_y:.3f};")
+            else:
+                dx = target_x - current_x
+                dy = target_y - current_y
+                if dx != 0 or dy != 0:
+                    commands.append(f"MR {dx:.3f}, {dy:.3f};")
             current_x, current_y = target_x, target_y
             first_xy_move = False
         dispense_time_sec = area * time_per_sqmm
@@ -293,7 +341,7 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None):
     return commands
 
 
-def generate_acl_from_gerber(gerber_path, settings=None, xy_transform=None):
+def generate_acl_from_gerber(gerber_path, settings=None, xy_transform=None, mirror_x=False, origin_offset=None):
     """
     Open a Gerber file and return generated ACL commands.
 
@@ -303,7 +351,33 @@ def generate_acl_from_gerber(gerber_path, settings=None, xy_transform=None):
     from gerbonara import GerberFile
 
     layer = GerberFile.open(gerber_path)
-    return generate_acl_from_layer(layer, settings=settings, xy_transform=xy_transform)
+    return generate_acl_from_layer(
+        layer,
+        settings=settings,
+        xy_transform=xy_transform,
+        mirror_x=mirror_x,
+        origin_offset=origin_offset,
+    )
+
+
+def map_gerber_point(gerber_path, x_mm, y_mm, xy_transform=None, mirror_x=False, origin_offset=None):
+    """Map a raw Gerber coordinate into the current program coordinate frame."""
+    from gerbonara import GerberFile
+
+    x_mm, y_mm = float(x_mm), float(y_mm)
+    if mirror_x:
+        layer = GerberFile.open(gerber_path)
+        xs = [obj.x for obj in layer.objects if type(obj).__name__ == "Flash" and get_aperture_area(obj.aperture) > 0]
+        if not xs:
+            raise ValueError("Gerber file contains no dispensing pads")
+        center_x = (min(xs) + max(xs)) / 2.0
+        x_mm = 2.0 * center_x - x_mm
+    if xy_transform:
+        x_mm, y_mm = _rotate_xy(x_mm, y_mm, xy_transform)
+        x_mm += float(xy_transform["offset_x_mm"])
+        y_mm += float(xy_transform["offset_y_mm"])
+    origin_offset = origin_offset or {}
+    return x_mm + float(origin_offset.get("x", 0.0)), y_mm + float(origin_offset.get("y", 0.0))
 
 
 def _rotate_xy(x_mm, y_mm, transform):
