@@ -102,3 +102,29 @@ def test_mirrored_bed_correction_uses_measured_holder_coordinates():
     # Pad (2, 1) lands at holder (8, 3): correction = 25 steps, safe Z = -50.
     assert "MA 80.000, 30.000;" in commands
     assert "MZ 75.000; OA; OZ;" in commands
+
+
+@pytest.mark.parametrize("angle", [0, math.radians(2.5), math.radians(-1)])
+@pytest.mark.parametrize("fiducials", [[(20, 10), (80, 40)], [(20, 10), (80, 10)], [(20, 10), (20, 40)]])
+def test_matching_fiducials_determine_reflection_placement_without_board_dimensions(angle, fiducials):
+    samples = []
+    for x, y in fiducials:
+        machine_x, machine_y = _placed_point(x, y, angle, 110, 5, mirrored=True)
+        samples.append({"x": x, "y": y, "machine_x": machine_x, "machine_y": machine_y})
+
+    transform = fit_fiducial_transform(samples, mirror_x=True)
+    commands, pads = _dispense_coordinates(
+        SimpleNamespace(objects=[Flash(30, 18), Flash(70, 25)]), mirror_x=True, xy_transform=transform
+    )
+
+    assert transform["angle_rad"] == pytest.approx(angle)
+    assert transform["offset_x_mm"] == pytest.approx(110)
+    assert transform["offset_y_mm"] == pytest.approx(5)
+    for (actual_x, actual_y), (source_x, source_y) in zip(pads, [(30, 18), (70, 25)]):
+        assert (actual_x, actual_y) == pytest.approx(
+            _placed_point(source_x, source_y, angle, 110, 5, mirrored=True), abs=2e-5
+        )
+        assert actual_x > 0 and actual_y > 0
+    points = parse_acl_toolpath(commands, settings={"STEPSXY_PER_MM": 100})
+    assert (points[-1].x_mm, points[-1].y_mm) == pytest.approx((0, 0), abs=2e-5)
+    assert all("SO" not in command for command in commands)

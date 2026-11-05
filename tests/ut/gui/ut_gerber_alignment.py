@@ -196,9 +196,44 @@ def test_mirrored_machine_execution_waits_for_fiducials(alignment_page):
     _set_mirror(page, True)
 
     assert not page._can_send_to_machine()
-    assert page.machine_status == "Measure mirrored fiducials"
+    assert page.machine_status == "Record two mirrored fiducials"
+    assert page.execution_lines == []
+    assert "Record two mirrored fiducials" in page._empty_toolpath_message()
     page.simulation_mode = True
-    assert page._can_send_to_machine()
+    assert not page._can_send_to_machine()
+
+
+def test_mirror_does_not_display_or_export_an_unplaced_program(alignment_page, monkeypatch):
+    page, config_path = alignment_page
+    original_config = config_path.read_text()
+    assert page.execution_lines
+    save_dialog = Mock()
+    monkeypatch.setattr("src.gui.view.engine_room_page.filedialog.asksaveasfilename", save_dialog)
+
+    _set_mirror(page, True)
+    page._save_program(None)
+
+    assert page.execution_lines == []
+    assert not page.events
+    save_dialog.assert_not_called()
+    assert config_path.read_text() == original_config
+
+
+def test_loading_bottom_file_waits_for_new_fiducials_and_keeps_holder_zero(alignment_page):
+    page, config_path = alignment_page
+    original_config = config_path.read_text()
+    _set_mirror(page, True)
+    page.xy_transform = {"angle_rad": 0, "offset_x_mm": 110, "offset_y_mm": 5}
+    page._generate_gerber_program("board.gbr")
+    assert page.execution_lines
+
+    result = page._generate_gerber_program("another_bottom.gbr")
+
+    assert result["requires_fiducials"]
+    assert page.xy_transform is None
+    assert page.execution_lines == []
+    assert page.gerber_path == "another_bottom.gbr"
+    assert config_path.read_text() == original_config
 
 
 def test_duplicate_fiducial_can_be_corrected_without_changing_origin(alignment_page, monkeypatch):

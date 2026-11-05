@@ -11,7 +11,6 @@ from src.backend.machine_management import (
     generate_acl_from_gerber,
     get_serial_preflight_error,
     list_serial_ports,
-    mirror_gerber_point,
     parse_acl_toolpath,
 )
 from src.business_logic.models.engine_room_model import EngineRoomModel
@@ -518,12 +517,17 @@ class EngineRoomPage(Base):
             self._preview_text(
                 476,
                 482,
-                "No toolpath loaded",
+                self._empty_toolpath_message(),
                 fill="#9fb2cc",
                 font=(self.default_font or "Helvetica", 16),
             )
 
         self._add_process_setup_panel()
+
+    def _empty_toolpath_message(self):
+        if self.gerber_mirrored and self.gerber_path and self.xy_transform is None:
+            return "Record two mirrored fiducials to position the board"
+        return "No toolpath loaded"
 
     def _draw_preview_background(self, x0, y0, x1, y1):
         self._rect(x0, y0, x1, y1, fill="#0f1724", outline="#22324a", width=2)
@@ -988,8 +992,9 @@ class EngineRoomPage(Base):
         count_combo = ttk.Combobox(content, textvariable=count_var, values=("2", "3", "4"), state="readonly", width=6)
         count_combo.grid(row=0, column=1, sticky="w", pady=5)
         instructions = (
-            "Holder origin stays fixed. Enter original Gerber fiducial coordinates in mm; X is mirrored automatically. "
-            "Use the machine panel to center the head over each physical fiducial, then Save fiducial."
+            "Keep the holder origin. Enter each fiducial's ORIGINAL Gerber coordinates in mm. "
+            "Center the head over that same physical fiducial on the flipped board, then Save fiducial. "
+            "Two measurements determine the mirrored board's placement; no board dimensions are needed."
             if self.gerber_mirrored else
             "Keep the saved holder origin. Enter original Gerber fiducial coordinates in mm. "
             "Go to each fiducial, align the head using the machine panel, then Save fiducial."
@@ -1093,11 +1098,10 @@ class EngineRoomPage(Base):
                     self._generate_gerber_program(self.gerber_path)
             # A retry replaces the active nominal point and discards later samples.
             del points[state["index"]:]
-            source_x, source_y = mirror_gerber_point(x_mm, y_mm, mirror_x=self.gerber_mirrored)
-            points.append({"x": source_x, "y": source_y})
+            points.append({"x": x_mm, "y": y_mm})
             state["point_ready"] = False
             self.xy_calibration_active = True
-            return source_x, source_y, count, settings
+            return x_mm, y_mm, count, settings
 
         def go_to_fiducial():
             prepared = prepare_point()
@@ -1170,26 +1174,24 @@ class EngineRoomPage(Base):
                     ))
                     return
                 try:
-                    transform = fit_fiducial_transform(points)
+                    transform = fit_fiducial_transform(points, mirror_x=self.gerber_mirrored)
                 except ValueError as exc:
                     state["index"] -= 1
                     status_var.set("Calibration could not be calculated: {}".format(exc))
                     return
                 self.xy_transform = transform
                 generated_program = self._generate_gerber_program(self.gerber_path)
-                state["complete"] = True
                 angle_deg = math.degrees(transform["angle_rad"])
-                if generated_program is None:
-                    status_var.set(
-                        "Calibration complete. Rotation {:+.4f}°, translation X {:+.3f} mm, Y {:+.3f} mm; Gerber commands could not be regenerated.".format(
-                            angle_deg,
-                            transform["offset_x_mm"],
-                            transform["offset_y_mm"],
-                        )
-                    )
+                if not generated_program or generated_program.get("error"):
+                    self.xy_transform = None
+                    self.execution_lines = []
+                    state["index"] = 0
+                    state["count"] = None
+                    status_var.set("Board placement calculated, but program generation failed. Reload the Gerber and retry calibration.")
                 else:
+                    state["complete"] = True
                     status_var.set(
-                        "Calibration complete. Rotation {:+.4f}°, translation X {:+.3f} mm, Y {:+.3f} mm. Machine commands regenerated.".format(
+                        "Calibration complete. Rotation {:+.4f}°, placement X {:+.3f} mm, Y {:+.3f} mm. Program regenerated; holder origin unchanged.".format(
                             angle_deg,
                             transform["offset_x_mm"],
                             transform["offset_y_mm"],
@@ -1611,7 +1613,7 @@ class EngineRoomPage(Base):
                 self._preview_text(
                     476,
                     482,
-                    "No toolpath loaded",
+                    self._empty_toolpath_message(),
                     fill="#9fb2cc",
                     font=(self.default_font or "Helvetica", 16),
                 )
@@ -2069,16 +2071,16 @@ class EngineRoomPage(Base):
         if settings is None:
             self._render()
             return False
+        if self.gerber_mirrored and self.xy_transform is None:
+            self.machine_status = "Record two mirrored fiducials"
+            self._render()
+            return False
         if not self.execution_lines:
             self.machine_status = "No program"
             self._render()
             return False
         if self.simulation_mode:
             return True
-        if self.gerber_mirrored and self.xy_transform is None:
-            self.machine_status = "Measure mirrored fiducials"
-            self._render()
-            return False
         serial_error = get_serial_preflight_error(settings)
         if serial_error:
             self.machine_status = "Machine offline"
@@ -2122,6 +2124,24 @@ class EngineRoomPage(Base):
         if settings is None:
             self._render()
             return {"simulation_mode": self.simulation_mode}
+        if self.gerber_mirrored and self.xy_transform is None:
+            # Placement of a flipped board is unknown until its matching
+            # fiducials are measured. Do not display or run a guessed -X path.
+            self.gerber_path = path
+            self.active_file = path
+            self.execution_lines = []
+            self.current_line = 0
+            self.selected_line = 0
+            self.progress_percent = 0
+            self.machine_status = "Record two mirrored fiducials"
+            self._render()
+            return {
+                "active_file": path,
+                "execution_lines": [],
+                "settings": settings,
+                "simulation_mode": self.simulation_mode,
+                "requires_fiducials": True,
+            }
         try:
             execution_lines = generate_acl_from_gerber(
                 path,
@@ -2153,6 +2173,10 @@ class EngineRoomPage(Base):
         }
 
     def _save_program(self, event):
+        if self.gerber_mirrored and self.xy_transform is None:
+            self.machine_status = "Record two mirrored fiducials"
+            self._render()
+            return None
         path = filedialog.asksaveasfilename(
             title="Save Program",
             defaultextension=".cnc",

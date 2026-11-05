@@ -388,8 +388,8 @@ def apply_xy_transform(x_mm, y_mm, transform):
     )
 
 
-def fit_fiducial_transform(fiducials):
-    """Fit a rigid transform mapping Gerber fiducials to machine coordinates."""
+def fit_fiducial_transform(fiducials, mirror_x=False):
+    """Fit board placement from original Gerber and measured holder coordinates."""
     if len(fiducials) < 2:
         raise ValueError("At least two fiducials are required")
     try:
@@ -399,6 +399,8 @@ def fit_fiducial_transform(fiducials):
         raise ValueError("Each fiducial needs finite Gerber and machine XY coordinates") from exc
     if not all(math.isfinite(value) for pair in source + target for value in pair):
         raise ValueError("Fiducial coordinates must be finite numbers")
+    if mirror_x:
+        source = [mirror_gerber_point(x, y, mirror_x=True) for x, y in source]
 
     source_x = sum(point[0] for point in source) / len(source)
     source_y = sum(point[1] for point in source) / len(source)
