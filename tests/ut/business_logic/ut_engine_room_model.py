@@ -7,6 +7,7 @@ from src.cfg.config_wrapper import ConfigWrapper
 def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
     config_values = {
         "TIME_PER_SQMM": 0.5,
+        "DISPENSE_LARGE_PAD_MULTIPLIER": 2.5,
         "Z_OFFSET_PER_SEC": 0.25,
         "Z_SAFE_HEIGHT": 12.0,
         "STEPSXY_PER_MM": 88.8,
@@ -30,6 +31,7 @@ def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
     assert data["machine_settings"]["SERIAL_PORT"] == "COM7"
     assert data["machine_settings"]["BAUD_RATE"] == 115200
     assert data["machine_settings"]["TIME_PER_SQMM"] == 0.5
+    assert data["machine_settings"]["DISPENSE_LARGE_PAD_MULTIPLIER"] == 2.5
     assert data["machine_settings"]["Z_OFFSET_PER_SEC"] == 0.25
     assert data["machine_settings"]["Z_SAFE_HEIGHT"] == 12.0
     assert data["machine_settings"]["STEPSXY_PER_MM"] == 88.8
@@ -42,6 +44,7 @@ def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
 def test_engine_room_model_restores_editable_machine_defaults_without_serial(monkeypatch):
     config_values = {
         "TIME_PER_SQMM": 0.5,
+        "DISPENSE_LARGE_PAD_MULTIPLIER": 2.5,
         "Z_OFFSET_PER_SEC": 0.25,
         "Z_SAFE_HEIGHT": 12.0,
         "STEPSXY_PER_MM": 88.8,
@@ -73,6 +76,7 @@ def test_engine_room_model_restores_editable_machine_defaults_without_serial(mon
     assert settings["MACHINE_ORIGIN"] == {"x": 12.5, "y": 30.25}
     assert saved_values == [
         ("TIME_PER_SQMM", 1.0, "USER"),
+        ("DISPENSE_LARGE_PAD_MULTIPLIER", 3.0, "USER"),
         ("Z_OFFSET_PER_SEC", 0.2, "USER"),
         ("Z_SAFE_HEIGHT", 5, "USER"),
         ("STEPSXY_PER_MM", 39.37, "USER"),

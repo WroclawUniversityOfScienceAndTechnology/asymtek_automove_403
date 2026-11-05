@@ -70,6 +70,7 @@ class EngineRoomPage(Base):
         self.machine_settings = EngineRoomModel.DEFAULT_MACHINE_SETTINGS.copy()
         self.machine_setting_fields = [
             ("TIME_PER_SQMM", "TIME_PER_SQMM", "s/mm2"),
+            ("DISPENSE_LARGE_PAD_MULTIPLIER", "Large pad boost", "x"),
             ("Z_OFFSET_PER_SEC", "Z_OFFSET_PER_SEC", "mm/s"),
             ("Z_SAFE_HEIGHT", "Z_SAFE_HEIGHT", "mm"),
             ("STEPSXY_PER_MM", "STEPSXY_PER_MM", "steps/mm"),
@@ -610,7 +611,7 @@ class EngineRoomPage(Base):
         self._panel(408, 588, 920, 444, "Process Setup")
         self._text(436, 654, "Input data", fill="#526071", font=(self.default_font or "Helvetica", 16, "bold"))
         for idx, (key, label, unit) in enumerate(self.machine_setting_fields):
-            y = 692 + idx * 42
+            y = 692 + idx * 38
             self._text(436, y + 8, label, fill="#172033", font=(self.default_font or "Helvetica", 13, "bold"))
             self._entry(key, 620, y, 112, 32)
             self._text(744, y + 8, unit, fill="#526071", font=(self.default_font or "Helvetica", 13))

@@ -10,6 +10,14 @@ from dataclasses import dataclass
 # USTAWIENIA MASZYNY ASYMTEK (ACL) I PASTY
 # ==========================================
 TIME_PER_SQMM = 1.0  # [sekundy/mm2] Czas wlaczenia zaworu na 1 mm2 powierzchni
+# Size anchors, not component-body areas. Tune these for the actual paste apertures.
+# ESP32 QFN48 5x5 nominal terminal b x L, datasheet Figure 6-2:
+# https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf
+DISPENSE_SMALL_PAD_AREA_MM2 = 0.18 * 0.35
+# Vishay 0805 IPC-7351 reflow land X x Y, document 28950:
+# https://www.vishay.com/doc/?28950=
+DISPENSE_LARGE_PAD_AREA_MM2 = 0.90 * 1.45
+DISPENSE_LARGE_PAD_MULTIPLIER = 3.0  # 1.0 restores linear timing; 3.0 triples the 0805 reference.
 Z_OFFSET_PER_SEC = 0.2  # [mm/sekunde] Wysokosc igly nad plytka na 1 s podawania
 Z_SAFE_HEIGHT = 5  # [mm] Wysokosc bezpieczna przelotu igly
 STEPSXY_PER_MM = 39.37  # [kroki/mm] Ilosc krokow na mm XY
@@ -18,6 +26,7 @@ PROGRAM_STEP_DELAY_SEC = 0.25  # [sekundy] Host-side pause between ACL program l
 
 DEFAULT_MACHINE_SETTINGS = {
     "TIME_PER_SQMM": TIME_PER_SQMM,
+    "DISPENSE_LARGE_PAD_MULTIPLIER": DISPENSE_LARGE_PAD_MULTIPLIER,
     "Z_OFFSET_PER_SEC": Z_OFFSET_PER_SEC,
     "Z_SAFE_HEIGHT": Z_SAFE_HEIGHT,
     "STEPSXY_PER_MM": STEPSXY_PER_MM,
@@ -190,6 +199,7 @@ def normalize_machine_settings(settings=None):
     if settings:
         for key in (
             "TIME_PER_SQMM",
+            "DISPENSE_LARGE_PAD_MULTIPLIER",
             "Z_OFFSET_PER_SEC",
             "Z_SAFE_HEIGHT",
             "STEPSXY_PER_MM",
@@ -204,6 +214,28 @@ def normalize_machine_settings(settings=None):
         if "BAUD_RATE" in settings:
             normalized_settings["BAUD_RATE"] = int(float(settings["BAUD_RATE"]))
     return normalized_settings
+
+
+def calculate_dispense_time(area_mm2, settings=None):
+    """Preserve small-pad timing and progressively boost larger-pad valve time."""
+    if isinstance(area_mm2, bool) or not isinstance(area_mm2, (int, float)) or not math.isfinite(area_mm2) or area_mm2 < 0:
+        raise ValueError("Pad area must be a finite non-negative number in mm2")
+    machine_settings = normalize_machine_settings(settings)
+    rate = machine_settings["TIME_PER_SQMM"]
+    large_pad_multiplier = machine_settings["DISPENSE_LARGE_PAD_MULTIPLIER"]
+    if not math.isfinite(rate) or rate <= 0:
+        raise ValueError("TIME_PER_SQMM must be a finite positive number")
+    if not math.isfinite(large_pad_multiplier) or large_pad_multiplier < 1:
+        raise ValueError("DISPENSE_LARGE_PAD_MULTIPLIER must be finite and at least 1")
+    small_area, large_area = DISPENSE_SMALL_PAD_AREA_MM2, DISPENSE_LARGE_PAD_AREA_MM2
+    if not (math.isfinite(small_area) and math.isfinite(large_area) and 0 < small_area < large_area):
+        raise ValueError("Dispense reference areas must be finite and satisfy 0 < small area < large area")
+    fraction = min(max((area_mm2 - small_area) / (large_area - small_area), 0.0), 1.0)
+    multiplier = 1.0 + (large_pad_multiplier - 1.0) * fraction
+    duration = area_mm2 * rate * multiplier
+    if not math.isfinite(duration):
+        raise ValueError("Calculated dispense time is outside the supported range")
+    return duration
 
 
 def build_serial_config(settings=None):
@@ -362,11 +394,14 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None, mirror_x=Fa
                     commands.append(f"MR {dx:.3f}, {dy:.3f};")
             current_x, current_y = target_x, target_y
             first_xy_move = False
-        dispense_time_sec = area * time_per_sqmm
+        linear_time_sec = area * time_per_sqmm
+        dispense_time_sec = calculate_dispense_time(area, settings=machine_settings)
 
         # Dispensing height
         # (Positive value because Z is inverted, so positive moves DOWN towards the board)
-        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(
+        # Timing compensation changes paste quantity, while nozzle clearance
+        # keeps its existing calibration based on the original linear time.
+        target_z_dispense = linear_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(
             current_x / stepsxy_per_mm, current_y / stepsxy_per_mm
         )
 

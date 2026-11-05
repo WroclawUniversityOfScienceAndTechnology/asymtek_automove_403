@@ -50,6 +50,28 @@ poetry run python run.py -p
 
 The UI stores runtime configuration under `~/AppData/cfg/conf.ini`. Default assets and default settings live in `src/cfg/AppData/`.
 
+Dispense timing uses pad area in **mm²**. `TIME_PER_SQMM` remains the base rate in seconds per mm².
+**Large pad boost** defaults to `3.0`: small pads retain their original timing, intermediate pad areas
+receive a progressively increasing multiplier, and the 0805 reference area receives three times its
+previous duration. Larger areas keep the configured multiplier instead of extrapolating the boost indefinitely.
+Set **Large pad boost** to `1.0` to restore linear timing. The setting is saved locally; reload the Gerber
+after changing it to regenerate the dispensing commands. This correction changes valve-open time only;
+XY positioning and the original Z-height calculation are preserved.
+
+The reference areas are editable constants near the top of `src/backend/machine_management.py`:
+`DISPENSE_SMALL_PAD_AREA_MM2 = 0.18 * 0.35` uses the nominal terminal dimensions of the ESP32 QFN48
+5×5 mm package from [Espressif's datasheet, Figure 6-2](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf).
+This is a package-terminal size reference, not a claim about the PCB's actual paste aperture.
+`DISPENSE_LARGE_PAD_AREA_MM2 = 0.90 * 1.45` uses the IPC-7351 reflow pad dimensions for an 0805 resistor in
+[Vishay document 28950](https://www.vishay.com/doc/?28950=). These provide starting anchors for the requested
+1×/3× timing calibration; the actual dispense-site area still comes from the loaded Gerber.
+
+For area `A`, small reference `S`, large reference `L`, and configured boost `M`, the multiplier is
+`1 + (M - 1) * clamp((A - S) / (L - S), 0, 1)` and the duration is `TIME_PER_SQMM * A * multiplier`.
+For example, with a base rate of `1.0`, the 0.063 mm² reference remains at 0.063 s and the 1.305 mm²
+reference changes from 1.305 s to 3.915 s. The manufacturers supply dimensions; the 3× timing target comes
+from the operator's observation and still needs a physical dispensing check.
+
 `SET ORIGIN` captures the current absolute machine X/Y position, sets the programmable origin,
 and saves both coordinates in mm as `MACHINE_ORIGIN` in the local configuration after the machine responds.
 Use `Machine > Program origin` to edit those saved coordinates and choose **Save and send to machine**.

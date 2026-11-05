@@ -289,6 +289,7 @@ def test_store_machine_settings_persists_editable_config(monkeypatch):
             settings,
             (
                 "TIME_PER_SQMM",
+                "DISPENSE_LARGE_PAD_MULTIPLIER",
                 "Z_OFFSET_PER_SEC",
                 "Z_SAFE_HEIGHT",
                 "STEPSXY_PER_MM",
