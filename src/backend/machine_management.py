@@ -486,6 +486,28 @@ def send_acl_command(serial_connection, command):
     serial_connection.write((command + "\r\n").encode("ascii"))
 
 
+def build_machine_origin_command(origin, settings=None):
+    """Convert an origin in absolute machine mm to the ACL SO command."""
+    steps_per_mm = normalize_machine_settings(settings)["STEPSXY_PER_MM"]
+    if not math.isfinite(steps_per_mm) or steps_per_mm <= 0:
+        raise ValueError("XY steps per mm must be a finite positive number.")
+    if not isinstance(origin, dict):
+        raise ValueError("Enter valid origin X and Y coordinates in mm.")
+    steps = []
+    for axis in ("x", "y"):
+        value = origin.get(axis)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError("Origin X and Y must be finite non-negative coordinates in mm.")
+        value_steps = value * steps_per_mm
+        if not math.isfinite(value_steps):
+            raise ValueError("Origin X and Y must be within the ACL range of 0 to 32767 steps.")
+        rounded_steps = int(round(value_steps))
+        if rounded_steps > 32767:
+            raise ValueError("Origin X and Y must be within the ACL range of 0 to 32767 steps.")
+        steps.append(rounded_steps)
+    return "SO {}, {};".format(*steps)
+
+
 def open_serial_connection(settings=None):
     """
     Open serial communication for the Asymtek ACL controller.
@@ -498,8 +520,11 @@ def open_serial_connection(settings=None):
     """
     import serial
 
+    origin_command = None
+    if settings and "MACHINE_ORIGIN" in settings:
+        origin_command = build_machine_origin_command(settings["MACHINE_ORIGIN"], settings)
     config = build_serial_config(settings=settings)
-    return serial.Serial(
+    serial_connection = serial.Serial(
         port=config.port,
         baudrate=config.baudrate,
         bytesize=serial.SEVENBITS,
@@ -509,6 +534,15 @@ def open_serial_connection(settings=None):
         timeout=config.timeout,
         write_timeout=config.write_timeout,
     )
+    if origin_command is not None:
+        try:
+            # Connections are opened per task, so this also restores the origin
+            # on the first communication after a cable reconnect or app restart.
+            send_acl_command_and_wait(serial_connection, origin_command + " OA; OZ;", settings=settings)
+        except Exception:
+            serial_connection.close()
+            raise
+    return serial_connection
 
 
 def get_serial_preflight_error(settings=None):

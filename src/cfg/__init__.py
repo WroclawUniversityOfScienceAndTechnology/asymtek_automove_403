@@ -143,7 +143,7 @@ class Configuration:
             [type]: value in auto-specified type
         """
         # pylint: disable=R1705
-        if '"' in value:
+        if value.startswith('"') and value.endswith('"'):
             return str(value[1:-1])
         elif value.isdecimal():
             return int(value)

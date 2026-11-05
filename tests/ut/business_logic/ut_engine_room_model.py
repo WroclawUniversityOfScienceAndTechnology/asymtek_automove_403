@@ -1,4 +1,7 @@
 from src.business_logic.models.engine_room_model import EngineRoomModel
+from src.cfg import Configuration
+from src.cfg.config_files_helper import ConfigFileHelper
+from src.cfg.config_wrapper import ConfigWrapper
 
 
 def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
@@ -12,6 +15,8 @@ def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
         "jog_distance_mm": 2.5,
         "SERIAL_PORT": "COM7",
         "BAUD_RATE": 115200,
+        "Z_BED_POINTS": [],
+        "MACHINE_ORIGIN": {"x": 12.5, "y": 30.25},
     }
 
     monkeypatch.setattr(EngineRoomModel, "get_language", classmethod(lambda cls: "en"))
@@ -31,6 +36,7 @@ def test_engine_room_model_reads_serial_settings_from_config(monkeypatch):
     assert data["machine_settings"]["STEPSZ_PER_MM"] == 22.0
     assert data["machine_settings"]["PROGRAM_STEP_DELAY_SEC"] == 0.1
     assert data["machine_settings"]["jog_distance_mm"] == 2.5
+    assert data["machine_settings"]["MACHINE_ORIGIN"] == {"x": 12.5, "y": 30.25}
 
 
 def test_engine_room_model_restores_editable_machine_defaults_without_serial(monkeypatch):
@@ -44,6 +50,8 @@ def test_engine_room_model_restores_editable_machine_defaults_without_serial(mon
         "jog_distance_mm": 2.5,
         "SERIAL_PORT": "COM7",
         "BAUD_RATE": 115200,
+        "Z_BED_POINTS": [],
+        "MACHINE_ORIGIN": {"x": 12.5, "y": 30.25},
     }
     saved_values = []
 
@@ -62,6 +70,7 @@ def test_engine_room_model_restores_editable_machine_defaults_without_serial(mon
     assert settings["BAUD_RATE"] == 115200
     assert settings["Z_SAFE_HEIGHT"] == 5
     assert settings["STEPSXY_PER_MM"] == 39.37
+    assert settings["MACHINE_ORIGIN"] == {"x": 12.5, "y": 30.25}
     assert saved_values == [
         ("TIME_PER_SQMM", 1.0, "USER"),
         ("Z_OFFSET_PER_SEC", 0.2, "USER"),
@@ -71,3 +80,16 @@ def test_engine_room_model_restores_editable_machine_defaults_without_serial(mon
         ("PROGRAM_STEP_DELAY_SEC", 0.25, "USER"),
         ("jog_distance_mm", 1.0, "USER"),
     ]
+
+
+def test_origin_defaults_for_old_config_and_survives_settings_updates(monkeypatch, tmp_path):
+    settings_path = tmp_path / "conf.ini"
+    settings_path.write_text("[GENERAL]\nauto_update = True\n[USER]\nlanguage = \"en\"\n")
+    monkeypatch.setattr(ConfigFileHelper, "SETTINGS_PATH", str(settings_path))
+
+    assert EngineRoomModel.get_machine_settings()["MACHINE_ORIGIN"] == {"x": 0, "y": 0}
+    ConfigWrapper.update_settings(str(settings_path), ConfigFileHelper.DEFAULT_SETTINGS_PATH)
+    Configuration.set("MACHINE_ORIGIN", {"x": 12.5, "y": 30.25})
+    ConfigWrapper.update_settings(str(settings_path), ConfigFileHelper.DEFAULT_SETTINGS_PATH)
+
+    assert EngineRoomModel.get_machine_settings()["MACHINE_ORIGIN"] == {"x": 12.5, "y": 30.25}

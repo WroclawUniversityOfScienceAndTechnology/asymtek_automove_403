@@ -1,5 +1,6 @@
 from src.logger import Logger
 from src.backend.machine_control import CONTROL_PAUSED, CONTROL_RUNNING, CONTROL_STOPPED, set_machine_control
+from src.backend.machine_management import build_machine_origin_command
 
 
 class MachineTaskDispatcher:
@@ -50,19 +51,27 @@ class MachineTaskDispatcher:
 
     def init_machine(self, payload):
         settings = payload.get("settings", {})
+        origin = self._origin_after_reset(settings)
         task = self._load_tasks().send_acl_command_task.delay(
-            "in; OA; OZ;",
+            "in; " + origin + "OA; OZ;",
             settings=settings
         )
         return task.id
 
     def home_machine(self, payload):
         settings = payload.get("settings", {})
+        origin = self._origin_after_reset(settings)
         task = self._load_tasks().send_acl_command_task.delay(
-            "fh; OA; OZ;",
+            "fh; " + origin + "OA; OZ;",
             settings=settings
         )
         return task.id
+
+    @staticmethod
+    def _origin_after_reset(settings):
+        if "MACHINE_ORIGIN" in settings:
+            return build_machine_origin_command(settings["MACHINE_ORIGIN"], settings) + " "
+        return ""
 
     def set_origin(self, payload):
         settings = payload.get("settings", {})

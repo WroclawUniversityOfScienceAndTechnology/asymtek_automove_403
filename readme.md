@@ -50,6 +50,13 @@ poetry run python run.py -p
 
 The UI stores runtime configuration under `~/AppData/cfg/conf.ini`. Default assets and default settings live in `src/cfg/AppData/`.
 
+`SET ORIGIN` captures the current absolute machine X/Y position, sets the programmable origin,
+and saves both coordinates in mm as `MACHINE_ORIGIN` in the local configuration after the machine responds.
+Use `Machine > Program origin` to edit those saved coordinates and choose **Save and send to machine**.
+`GO ORIGIN` restores the saved origin, raises Z by the configured safe height, and moves to program X/Y zero.
+The saved origin is also restored whenever a communication connection opens, including after a reconnect,
+and after `INIT` or `HOME`. Origin controls require machine mode.
+
 ## Screen Resolution
 
 The application starts at `1280x720`, which is scaled down by one-third from the original `1920x1080` layout.

@@ -5,6 +5,8 @@
 Vericiator module
 """
 
+import math
+
 
 def _is_positive_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
@@ -12,6 +14,13 @@ def _is_positive_number(value):
 
 def _is_non_negative_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+
+
+def _is_machine_origin(value):
+    return isinstance(value, dict) and all(
+        _is_non_negative_number(value.get(axis)) and math.isfinite(value[axis])
+        for axis in ("x", "y")
+    )
 
 
 class ConfigVerificator:
@@ -50,6 +59,7 @@ class ConfigVerificator:
         "SERIAL_PORT": lambda value: isinstance(value, str) and bool(value.strip()),
         "BAUD_RATE": lambda value: isinstance(value, int) and not isinstance(value, bool) and value > 0,
         "Z_BED_POINTS": lambda value: isinstance(value, list) and all(isinstance(point, dict) and all(isinstance(point.get(key), (int, float)) for key in ("x", "y", "z_steps")) for point in value),
+        "MACHINE_ORIGIN": _is_machine_origin,
     }
 
     section_mappings = {
@@ -76,6 +86,7 @@ class ConfigVerificator:
         "SERIAL_PORT": "USER",
         "BAUD_RATE": "USER",
         "Z_BED_POINTS": "USER",
+        "MACHINE_ORIGIN": "USER",
     }
 
     @classmethod

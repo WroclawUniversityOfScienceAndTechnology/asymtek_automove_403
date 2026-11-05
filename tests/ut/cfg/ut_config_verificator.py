@@ -31,6 +31,8 @@ def test_get_keys():
         "jog_distance_mm",
         "SERIAL_PORT",
         "BAUD_RATE",
+        "Z_BED_POINTS",
+        "MACHINE_ORIGIN",
     ]
 
 
@@ -177,5 +179,7 @@ def test_get_section():
         "jog_distance_mm",
         "SERIAL_PORT",
         "BAUD_RATE",
+        "Z_BED_POINTS",
+        "MACHINE_ORIGIN",
     ]:
         assert ConfigVerificator.get_section(key) == "USER"

@@ -6,11 +6,11 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from src.backend.machine_management import (
+    build_machine_origin_command,
     fit_fiducial_transform,
     generate_acl_from_gerber,
     get_serial_preflight_error,
     list_serial_ports,
-    map_gerber_point,
     parse_acl_toolpath,
 )
 from src.business_logic.models.engine_room_model import EngineRoomModel
@@ -55,7 +55,6 @@ class EngineRoomPage(Base):
         self._program_origin_dialog = None
         self.xy_calibration_active = False
         self.xy_transform = None
-        self.program_origin_offset = {"x": 0.0, "y": 0.0}
         self._calibration_move_callback = None
         self._status_text_item = None
         self._progress_bar_item = None
@@ -66,7 +65,6 @@ class EngineRoomPage(Base):
         self._execution_line_list = None
         self._displayed_current_line = None
         self._preview_dynamic_items = []
-        self.preview_origin_target = None
         self._machine_settings_autosave_after_id = None
         self._machine_settings_autosave_delay_ms = 500
         self.machine_settings = EngineRoomModel.DEFAULT_MACHINE_SETTINGS.copy()
@@ -584,20 +582,12 @@ class EngineRoomPage(Base):
             self._preview_oval(x - 4, y - 4, x + 4, y + 4, fill="#f97316", outline="#fed7aa")
 
     def _draw_current_tool_position(self, points, mapped_points):
-        if self.preview_origin_target is not None:
-            target_x_mm, target_y_mm = self.preview_origin_target
-            pad_indices = [idx for idx, point in enumerate(points) if point.dispensing]
-            current_idx = min(
-                pad_indices or range(len(points)),
-                key=lambda idx: (points[idx].x_mm - target_x_mm) ** 2 + (points[idx].y_mm - target_y_mm) ** 2,
-            )
-        else:
-            current_idx = 0
-            for idx, point in enumerate(points):
-                if point.line_index <= self.current_line:
-                    current_idx = idx
-                else:
-                    break
+        current_idx = 0
+        for idx, point in enumerate(points):
+            if point.line_index <= self.current_line:
+                current_idx = idx
+            else:
+                break
 
         nozzle_x, nozzle_y = mapped_points[current_idx]
         self._preview_polygon(
@@ -1210,196 +1200,67 @@ class EngineRoomPage(Base):
         dialog.transient(parent)
         content = ttk.Frame(dialog, padding=16)
         content.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(content, text="Reference point coordinates in the loaded Gerber (mm):").grid(
+        ttk.Label(content, text="Saved machine origin coordinates from home (mm):").grid(
             row=0, column=0, columnspan=4, sticky="w", pady=(0, 8)
         )
-        x_var, y_var = tk.StringVar(), tk.StringVar()
+        origin = self.machine_settings["MACHINE_ORIGIN"]
+        x_var = tk.StringVar(value=str(origin["x"]))
+        y_var = tk.StringVar(value=str(origin["y"]))
         ttk.Label(content, text="X (mm)").grid(row=1, column=0, sticky="e", padx=4, pady=5)
         ttk.Entry(content, textvariable=x_var, width=12).grid(row=1, column=1, sticky="w", pady=5)
         ttk.Label(content, text="Y (mm)").grid(row=1, column=2, sticky="e", padx=4, pady=5)
         ttk.Entry(content, textvariable=y_var, width=12).grid(row=1, column=3, sticky="w", pady=5)
-        status_var = tk.StringVar(value="Choose the Gerber point to approach, then align the head over its center.")
+        status_var = tk.StringVar(value="Adjust X and Y, then save and send the origin to the machine.")
         ttk.Label(content, textvariable=status_var, wraplength=520).grid(
             row=2, column=0, columnspan=4, sticky="w", pady=(8, 10)
         )
-        state = {"busy": False, "anchor_program": None, "anchor_machine": None,
-                 "phase": "anchor", "safe_z_target": None, "fields_mapped": False}
-        for entry in content.winfo_children():
-            if isinstance(entry, ttk.Entry):
-                entry.bind("<KeyRelease>", lambda _event: state.__setitem__("fields_mapped", False))
+        state = {"busy": False}
 
         def close_dialog():
             if self._program_origin_dialog is dialog:
                 self._program_origin_dialog = None
-                if self._calibration_move_callback is not None:
-                    self._calibration_move_callback = None
             dialog.destroy()
-            self.preview_origin_target = None
-            self._refresh_preview_progress()
 
-        def dispatch(command, callback, timeout=30.0):
-            settings = self._read_machine_settings(update_status=False)
-            if settings is None or self.simulation_mode:
-                status_var.set("Connect the machine and turn off simulation mode before setting the program origin.")
-                return
-            error = get_serial_preflight_error(settings)
-            if error:
-                status_var.set("Machine connection error: {}".format(error))
-                return
-            settings["COMMAND_TIMEOUT_SEC"] = timeout
-            state["busy"] = True
-
-            def completed(progress):
-                if not dialog.winfo_exists() or self._program_origin_dialog is not dialog:
-                    return
-                state["busy"] = False
-                if progress.get("status") != "sent":
-                    status_var.set("Machine error: {}. Retry the last step.".format(progress.get("error", "No ACL response")))
-                    return
-                callback(progress)
-
-            self._calibration_move_callback = completed
-            self._emit("calibration_command", payload={"command": command, "settings": settings})
-
-        def approach_point(x_mm, y_mm):
-            if state["busy"]:
-                return
-            settings = self._read_machine_settings(update_status=False)
-            if settings is None:
-                status_var.set("Check machine settings before continuing.")
-                return
-            status_var.set("Moving safely to X {:.3f}, Y {:.3f} mm…".format(x_mm, y_mm))
-
-            def after_read(progress):
-                position = progress.get("machine_position") or {}
-                try:
-                    current_z = float(position.get("z", position.get("Z")))
-                    target_x = float(x_mm) * float(settings["STEPSXY_PER_MM"])
-                    target_y = float(y_mm) * float(settings["STEPSXY_PER_MM"])
-                    safe_z = current_z - float(settings["Z_SAFE_HEIGHT"])
-                    state["safe_z_target"] = safe_z
-                    z_delta = (safe_z - current_z) * float(settings["STEPSZ_PER_MM"])
-                except (TypeError, ValueError, KeyError):
-                    status_var.set("Current machine position or settings are unavailable.")
-                    return
-                dispatch("MZ {:.3f}; MA {:.3f}, {:.3f}; OA; OZ;".format(z_delta, target_x, target_y),
-                         lambda _result: arrived(x_mm, y_mm))
-
-            dispatch("OA; OZ;", after_read, timeout=5.0)
-
-        def arrived(x_mm, y_mm):
-            state["anchor_program"] = (
-                float(x_mm) - float(self.program_origin_offset.get("x", 0.0)),
-                float(y_mm) - float(self.program_origin_offset.get("y", 0.0)),
-            )
-            state["phase"] = "anchor"
-            status_var.set("At reference point. Center the head over the pad, then choose Confirm point / origin.")
-
-        def lower_left_pad():
-            if not self.gerber_path:
-                messagebox.showerror("Set Program Origin", "Load a Gerber file first.", parent=dialog)
-                return
-            points = [point for point in parse_acl_toolpath(self.execution_lines, settings=self.machine_settings)
-                      if point.dispensing]
-            if not points:
-                messagebox.showerror("Set Program Origin", "No dispensing pads were found in the loaded program.", parent=dialog)
-                return
-            point = min(points, key=lambda item: (item.x_mm, item.y_mm))
-            self.preview_origin_target = (point.x_mm, point.y_mm)
-            self._refresh_preview_progress()
-            x_var.set("{:.4f}".format(point.x_mm))
-            y_var.set("{:.4f}".format(point.y_mm))
-            state["fields_mapped"] = True
-            approach_point(point.x_mm, point.y_mm)
-
-        def selected_point():
-            if not self.gerber_path:
-                messagebox.showerror("Set Program Origin", "Load a Gerber file first.", parent=dialog)
+        def save_origin():
+            if state["busy"] or self._calibration_move_callback is not None:
+                status_var.set("Wait for the current machine command to finish.")
                 return
             try:
-                x_mm = float(x_var.get().replace(",", "."))
-                y_mm = float(y_var.get().replace(",", "."))
-                if not math.isfinite(x_mm) or not math.isfinite(y_mm):
-                    raise ValueError
+                new_origin = {"x": float(x_var.get().replace(",", ".")),
+                              "y": float(y_var.get().replace(",", "."))}
             except ValueError:
                 messagebox.showerror("Set Program Origin", "Enter valid X and Y coordinates in mm.", parent=dialog)
                 return
-            if not state["fields_mapped"]:
-                try:
-                    x_mm, y_mm = map_gerber_point(
-                        self.gerber_path, x_mm, y_mm, xy_transform=self.xy_transform,
-                        mirror_x=self.gerber_mirrored, origin_offset=self.program_origin_offset,
-                    )
-                except Exception as exc:  # pylint: disable=W0718
-                    messagebox.showerror("Set Program Origin", str(exc), parent=dialog)
+            settings = self._read_machine_settings(update_status=False)
+            if settings is None or self.simulation_mode:
+                status_var.set("Check machine settings and turn off simulation mode before saving the origin.")
+                return
+            state["busy"] = True
+            status_var.set("Saving and sending the machine origin…")
+
+            def completed(success, status):
+                if self._program_origin_dialog is not dialog:
                     return
-            approach_point(x_mm, y_mm)
+                state["busy"] = False
+                status_var.set(status)
+                if success:
+                    saved_origin = self.machine_settings["MACHINE_ORIGIN"]
+                    x_var.set(str(saved_origin["x"]))
+                    y_var.set(str(saved_origin["y"]))
 
-        def confirm_point_origin():
-            if state["busy"]:
-                return
-            if state["anchor_program"] is None:
-                status_var.set("Approach a Gerber reference point first.")
-                return
-            if state["phase"] == "anchor":
-                status_var.set("Recording the reference point position…")
-
-                def record_anchor(progress):
-                    position = progress.get("machine_position") or {}
-                    try:
-                        state["anchor_machine"] = (float(position.get("x", position.get("X"))),
-                                                    float(position.get("y", position.get("Y"))))
-                    except (TypeError, ValueError):
-                        status_var.set("XY position unavailable. Check the machine position readout and retry.")
-                        return
-                    state["phase"] = "origin"
-                    def return_to_safe_height(height_progress):
-                        position = height_progress.get("machine_position") or {}
-                        try:
-                            current_z = float(position.get("z", position.get("Z")))
-                            target_z = state["safe_z_target"]
-                            settings = self._read_machine_settings(update_status=False)
-                            delta_steps = (target_z - current_z) * float(settings["STEPSZ_PER_MM"])
-                        except (TypeError, ValueError, KeyError):
-                            status_var.set("Could not restore the safe height. Check the machine Z position.")
-                            return
-                        dispatch("MZ {:.3f}; OA; OZ;".format(delta_steps),
-                                 lambda _result: status_var.set("Reference saved. Move the head to the new origin and confirm again."))
-
-                    dispatch("OA; OZ;", return_to_safe_height, timeout=5.0)
-
-                dispatch("OC; OZ;", record_anchor, timeout=5.0)
-                return
-
-            status_var.set("Saving the new program origin…")
-
-            def record_origin(progress):
-                position = progress.get("machine_position") or {}
-                try:
-                    origin_x = float(position.get("x", position.get("X")))
-                    origin_y = float(position.get("y", position.get("Y")))
-                except (TypeError, ValueError):
-                    status_var.set("XY position unavailable. Check the machine position readout and retry.")
-                    return
-                point_x, point_y = state["anchor_program"]
-                anchor_x, anchor_y = state["anchor_machine"]
-                self.program_origin_offset = {"x": anchor_x - origin_x - point_x,
-                                              "y": anchor_y - origin_y - point_y}
-                self._generate_gerber_program(self.gerber_path)
-                status_var.set("Program origin saved. Machine origin and Gerber file were not changed.")
-
-            dispatch("OC; OZ;", record_origin, timeout=5.0)
+            self._save_and_set_machine_origin(new_origin, settings, completed)
 
         buttons = ttk.Frame(content)
         buttons.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         for label, command in (
-            ("Lower-left pad", lower_left_pad),
-            ("Selected point XY", selected_point),
-            ("Confirm point / origin", confirm_point_origin),
+            ("Save and send to machine", save_origin),
             ("Close", close_dialog),
         ):
             ttk.Button(buttons, text=label, command=command).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dialog.bind("<Escape>", lambda _event: close_dialog())
+        dialog.bind("<Return>", lambda _event: save_origin())
+        dialog.grab_set()
         dialog.update_idletasks()
         x = parent.winfo_rootx() + max((parent.winfo_width() - dialog.winfo_width()) // 2, 0)
         y = parent.winfo_rooty() + max((parent.winfo_height() - dialog.winfo_height()) // 2, 0)
@@ -1515,6 +1376,8 @@ class EngineRoomPage(Base):
             close_dialog()
             self.machine_status = "Serial set"
             self._render()
+            self._cancel_position_poll()
+            self._poll_position()
 
         ttk.Button(buttons, text="Cancel", command=close_dialog).grid(row=0, column=0, padx=(0, 8))
         ttk.Button(buttons, text="Apply", command=apply_serial_settings).grid(row=0, column=1)
@@ -1921,6 +1784,8 @@ class EngineRoomPage(Base):
         return {"settings": settings}
 
     def _set_origin(self, event):
+        if self._calibration_move_callback is not None:
+            return None
         settings = self._read_machine_settings()
         if settings is None:
             self._render()
@@ -1942,23 +1807,46 @@ class EngineRoomPage(Base):
     def _apply_set_machine_origin(self, progress, settings):
         position = progress.get("machine_position") or {}
         try:
-            x_steps = int(round(float(position.get("x", position.get("X"))) * float(settings["STEPSXY_PER_MM"])))
-            y_steps = int(round(float(position.get("y", position.get("Y"))) * float(settings["STEPSXY_PER_MM"])))
+            origin = {"x": float(position.get("x", position.get("X"))),
+                      "y": float(position.get("y", position.get("Y")))}
         except (TypeError, ValueError, KeyError):
             self.machine_status = "Origin failed: position unavailable"
             self._render()
             return
-        if not (0 <= x_steps <= 32767 and 0 <= y_steps <= 32767):
-            self.machine_status = "Origin failed: outside ACL range"
-            self._render()
+        self._save_and_set_machine_origin(origin, settings)
+
+    def _save_and_set_machine_origin(self, origin, settings, on_complete=None):
+        def completed(success, status):
+            self._finish_machine_origin_command(status)
+            if on_complete is not None:
+                on_complete(success, status)
+
+        try:
+            command = build_machine_origin_command(origin, settings)
+        except (TypeError, ValueError, KeyError) as exc:
+            completed(False, "Origin failed: {}".format(exc))
             return
+        origin = dict(origin)
+
+        def save_origin(_progress):
+            try:
+                Configuration.set("MACHINE_ORIGIN", origin, section="USER")
+            except (OSError, RuntimeError) as exc:
+                completed(False, "Machine origin set, but local save failed: {}".format(exc))
+                return
+            self.machine_settings["MACHINE_ORIGIN"] = origin
+            completed(True, "Machine origin set and saved")
+
         self._dispatch_machine_origin_command(
-            "SO {}, {}; OA; OZ;".format(x_steps, y_steps),
-            settings,
-            lambda _result: self._finish_machine_origin_command("Machine origin set"),
+            command + " OA; OZ;",
+            dict(settings, MACHINE_ORIGIN=origin),
+            save_origin,
+            on_error=lambda progress: completed(False, "Origin failed: {}".format(progress.get("error", "No ACL response"))),
         )
 
     def _go_machine_origin(self, event):
+        if self._calibration_move_callback is not None:
+            return None
         settings = self._read_machine_settings()
         if settings is None:
             self._render()
@@ -1967,6 +1855,11 @@ class EngineRoomPage(Base):
             self.machine_status = "Simulation"
             self._render()
             return {"settings": settings, "simulation_mode": True}
+        try:
+            origin_command = build_machine_origin_command(settings["MACHINE_ORIGIN"], settings)
+        except (TypeError, ValueError, KeyError) as exc:
+            self._finish_machine_origin_command("Origin move failed: {}".format(exc))
+            return None
         self.machine_status = "Moving to origin"
         self._render()
 
@@ -1976,6 +1869,8 @@ class EngineRoomPage(Base):
                 current_z = float(position.get("z", position.get("Z")))
                 safe_z = current_z - float(settings["Z_SAFE_HEIGHT"])
                 z_delta_steps = (safe_z - current_z) * float(settings["STEPSZ_PER_MM"])
+                if not math.isfinite(current_z) or not math.isfinite(z_delta_steps):
+                    raise ValueError
             except (TypeError, ValueError, KeyError):
                 self.machine_status = "Origin move failed: Z unavailable"
                 self._render()
@@ -1990,20 +1885,25 @@ class EngineRoomPage(Base):
                 lambda _result: self._finish_machine_origin_command("At machine origin"),
             )
 
-        self._dispatch_machine_origin_command("OA; OZ;", settings, move_from_position, timeout=5.0)
+        self._dispatch_machine_origin_command(origin_command + " OA; OZ;", settings, move_from_position, timeout=5.0)
         return None
 
-    def _dispatch_machine_origin_command(self, command, settings, callback, timeout=30.0):
+    def _dispatch_machine_origin_command(self, command, settings, callback, timeout=30.0, on_error=None):
         settings = dict(settings)
         settings["COMMAND_TIMEOUT_SEC"] = timeout
 
         def completed(progress):
             if progress.get("status") != "sent":
-                self.machine_status = "Machine error"
-                self._render()
+                self._finish_machine_origin_command("Machine error: {}".format(progress.get("error", "No ACL response")))
+                if on_error is not None:
+                    on_error(progress)
                 return
             callback(progress)
 
+        error = get_serial_preflight_error(settings)
+        if error:
+            completed({"status": "error", "error": error})
+            return
         self._calibration_move_callback = completed
         self._emit("calibration_command", payload={"command": command, "settings": settings})
 
@@ -2174,7 +2074,6 @@ class EngineRoomPage(Base):
     def _generate_gerber_program(self, path):
         if path != self.gerber_path:
             self.xy_transform = None
-            self.program_origin_offset = {"x": 0.0, "y": 0.0}
         settings = self._read_machine_settings()
         if settings is None:
             self._render()
@@ -2185,7 +2084,6 @@ class EngineRoomPage(Base):
                 settings=settings,
                 xy_transform=self.xy_transform,
                 mirror_x=self.gerber_mirrored,
-                origin_offset=self.program_origin_offset,
             )
         except Exception as exc:  # pylint: disable=W0718
             self.machine_status = "Load failed"
@@ -2287,6 +2185,9 @@ class EngineRoomPage(Base):
         else:
             self.machine_status = "Ready" if self.execution_lines else "Idle"
         self._render()
+        if not self.simulation_mode:
+            self._cancel_position_poll()
+            self._poll_position()
         return None
 
     def _start_simulation(self, start_index):
@@ -2375,12 +2276,14 @@ class EngineRoomPage(Base):
     def _poll_position(self):
         self._position_poll_id = None
 
-        idle_statuses = ("Idle", "Ready", "Complete", "Stopped", "Initialized", "Sim Jog", "Jogging")
+        idle_statuses = ("Idle", "Ready", "Complete", "Stopped", "Initialized", "Sim Jog", "Jogging",
+                         "Serial set", "Machine origin set and saved", "At machine origin")
 
         if (
             self._z_compensation_dialog is None
             and self._xy_fiducial_dialog is None
             and self._program_origin_dialog is None
+            and self._calibration_move_callback is None
             and not self.simulation_mode
             and self.machine_status in idle_statuses
         ):
