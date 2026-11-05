@@ -113,6 +113,78 @@ def get_aperture_area(aperture):
     return 0.0
 
 
+def _region_area_and_centroid(outline):
+    """Return the absolute area and centroid of a Gerber region outline."""
+    if len(outline) < 3:
+        return 0.0, None
+    points = list(outline)
+    if points[0] == points[-1]:
+        points.pop()
+    if len(points) < 3:
+        return 0.0, None
+
+    cross_sum = 0.0
+    centroid_x = 0.0
+    centroid_y = 0.0
+    for (x1, y1), (x2, y2) in zip(points, points[1:] + points[:1]):
+        cross = x1 * y2 - x2 * y1
+        cross_sum += cross
+        centroid_x += (x1 + x2) * cross
+        centroid_y += (y1 + y2) * cross
+    if abs(cross_sum) < 1e-12:
+        return 0.0, None
+    centroid = (centroid_x / (3.0 * cross_sum), centroid_y / (3.0 * cross_sum))
+    return abs(cross_sum) / 2.0, centroid
+
+
+def _gerber_dispense_operations(layer):
+    """Convert flashes, filled regions, and unfilled strokes into dispense sites.
+
+    Gerber exporters may emit a region together with D01 strokes tracing its
+    outline. Those strokes describe the same copper/paste and must not be
+    dispensed a second time.
+    """
+    objects = list(layer.objects)
+    region_edges = set()
+    operations = []
+    for obj in objects:
+        if type(obj).__name__ != "Region" or not getattr(obj, "polarity_dark", True):
+            continue
+        outline = list(getattr(obj, "outline", ()))
+        area, centroid = _region_area_and_centroid(outline)
+        if not centroid or area <= 0:
+            continue
+        operations.append((centroid[0], centroid[1], area))
+        if len(outline) > 1:
+            if outline[0] == outline[-1]:
+                outline.pop()
+            for start, end in zip(outline, outline[1:] + outline[:1]):
+                region_edges.add((tuple(round(value, 9) for value in start), tuple(round(value, 9) for value in end)))
+
+    for obj in objects:
+        obj_type = type(obj).__name__
+        if obj_type == "Flash":
+            area = get_aperture_area(obj.aperture)
+            if area > 0:
+                operations.append((obj.x, obj.y, area))
+        elif obj_type == "Line" and getattr(obj, "polarity_dark", True):
+            start = (round(obj.x1, 9), round(obj.y1, 9))
+            end = (round(obj.x2, 9), round(obj.y2, 9))
+            if (start, end) in region_edges or (end, start) in region_edges:
+                continue
+            aperture_area = get_aperture_area(obj.aperture)
+            length = math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1)
+            if aperture_area <= 0 or length <= 0:
+                continue
+            # Approximate the swept aperture as a capsule. This preserves the
+            # stroke's material quantity while placing one operation at its
+            # midpoint, matching the existing dwell-based machine workflow.
+            effective_width = math.sqrt(aperture_area * 4.0 / math.pi)
+            stroke_area = aperture_area + length * effective_width
+            operations.append(((obj.x1 + obj.x2) / 2.0, (obj.y1 + obj.y2) / 2.0, stroke_area))
+    return operations
+
+
 def normalize_machine_settings(settings=None):
     normalized_settings = DEFAULT_MACHINE_SETTINGS.copy()
     if settings:
@@ -228,40 +300,34 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None, mirror_x=Fa
     # Gerber object order follows file layout, which can cause long, erratic
     # traversals. Greedily choose the nearest remaining dispense point, starting
     # from the assumed machine origin. The original order breaks distance ties.
-    flashes = [
-        obj
-        for obj in layer.objects
-        if type(obj).__name__ == "Flash" and get_aperture_area(obj.aperture) > 0
-    ]
-    ordered_flashes = []
+    dispense_operations = _gerber_dispense_operations(layer)
+    ordered_operations = []
     nearest_x = 0.0
     nearest_y = 0.0
-    while flashes:
+    while dispense_operations:
         next_index = min(
-            range(len(flashes)),
+            range(len(dispense_operations)),
             key=lambda index: (
-                (flashes[index].x - nearest_x) ** 2
-                + (flashes[index].y - nearest_y) ** 2,
+                (dispense_operations[index][0] - nearest_x) ** 2
+                + (dispense_operations[index][1] - nearest_y) ** 2,
                 index,
             ),
         )
-        obj = flashes.pop(next_index)
-        ordered_flashes.append(obj)
-        nearest_x = obj.x
-        nearest_y = obj.y
+        operation = dispense_operations.pop(next_index)
+        ordered_operations.append(operation)
+        nearest_x, nearest_y = operation[:2]
 
     # The command-generation loop below updates current_x/current_y in steps.
     current_x = 0.0
     current_y = 0.0
     previous_rotated_x_mm = None
     previous_rotated_y_mm = None
-    for obj in ordered_flashes:
-        area = get_aperture_area(obj.aperture)
+    for source_x, source_y, area in ordered_operations:
 
         # Apply the translation to the first absolute point only. Subsequent
         # relative moves use rotated Gerber deltas, so the translation cannot
         # accumulate or affect the distance between pads.
-        source_x_mm, source_y_mm = mirror_gerber_point(obj.x, obj.y, mirror_x=mirror_x)
+        source_x_mm, source_y_mm = mirror_gerber_point(source_x, source_y, mirror_x=mirror_x)
         if xy_transform:
             rotated_x_mm, rotated_y_mm = _rotate_xy(source_x_mm, source_y_mm, xy_transform)
             if first_xy_move:
