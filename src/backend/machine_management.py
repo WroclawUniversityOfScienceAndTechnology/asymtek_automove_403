@@ -255,20 +255,13 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None, mirror_x=Fa
     current_y = 0.0
     previous_rotated_x_mm = None
     previous_rotated_y_mm = None
-    mirror_center_x = (
-        (min(obj.x for obj in ordered_flashes) + max(obj.x for obj in ordered_flashes)) / 2.0
-        if mirror_x and ordered_flashes
-        else 0.0
-    )
-
     for obj in ordered_flashes:
         area = get_aperture_area(obj.aperture)
 
         # Apply the translation to the first absolute point only. Subsequent
         # relative moves use rotated Gerber deltas, so the translation cannot
         # accumulate or affect the distance between pads.
-        source_x_mm = 2.0 * mirror_center_x - obj.x if mirror_x else obj.x
-        source_y_mm = obj.y
+        source_x_mm, source_y_mm = mirror_gerber_point(obj.x, obj.y, mirror_x=mirror_x)
         if xy_transform:
             rotated_x_mm, rotated_y_mm = _rotate_xy(source_x_mm, source_y_mm, xy_transform)
             if first_xy_move:
@@ -307,7 +300,9 @@ def generate_acl_from_layer(layer, settings=None, xy_transform=None, mirror_x=Fa
 
         # Dispensing height
         # (Positive value because Z is inverted, so positive moves DOWN towards the board)
-        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(obj.x, obj.y)
+        target_z_dispense = dispense_time_sec * z_offset_per_sec * stepsz_per_mm + bed_correction(
+            current_x / stepsxy_per_mm, current_y / stepsxy_per_mm
+        )
 
         # 3. Relative Z lower (MZ) to dispensing height
         dz_down = target_z_dispense - current_z
@@ -360,18 +355,15 @@ def generate_acl_from_gerber(gerber_path, settings=None, xy_transform=None, mirr
     )
 
 
-def map_gerber_point(gerber_path, x_mm, y_mm, xy_transform=None, mirror_x=False, origin_offset=None):
-    """Map a raw Gerber coordinate into the current program coordinate frame."""
-    from gerbonara import GerberFile
-
+def mirror_gerber_point(x_mm, y_mm, mirror_x=False):
+    """Reflect X about holder zero; board placement comes from the fiducials."""
     x_mm, y_mm = float(x_mm), float(y_mm)
-    if mirror_x:
-        layer = GerberFile.open(gerber_path)
-        xs = [obj.x for obj in layer.objects if type(obj).__name__ == "Flash" and get_aperture_area(obj.aperture) > 0]
-        if not xs:
-            raise ValueError("Gerber file contains no dispensing pads")
-        center_x = (min(xs) + max(xs)) / 2.0
-        x_mm = 2.0 * center_x - x_mm
+    return (-x_mm if mirror_x else x_mm), y_mm
+
+
+def map_gerber_point(gerber_path, x_mm, y_mm, xy_transform=None, mirror_x=False, origin_offset=None):
+    """Map a raw Gerber coordinate into the holder frame without moving its origin."""
+    x_mm, y_mm = mirror_gerber_point(x_mm, y_mm, mirror_x=mirror_x)
     if xy_transform:
         x_mm, y_mm = _rotate_xy(x_mm, y_mm, xy_transform)
         x_mm += float(xy_transform["offset_x_mm"])

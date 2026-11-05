@@ -11,6 +11,7 @@ from src.backend.machine_management import (
     generate_acl_from_gerber,
     get_serial_preflight_error,
     list_serial_ports,
+    mirror_gerber_point,
     parse_acl_toolpath,
 )
 from src.business_logic.models.engine_room_model import EngineRoomModel
@@ -966,7 +967,7 @@ class EngineRoomPage(Base):
                 pass
 
     def open_xy_fiducial_calibration_dialog(self, parent=None):
-        """Guide the operator through origin setup and manual XY fiducial alignment."""
+        """Align board fiducials in the fixed holder coordinate frame."""
         if self._xy_fiducial_dialog is not None:
             try:
                 self._xy_fiducial_dialog.lift()
@@ -986,7 +987,14 @@ class EngineRoomPage(Base):
         ttk.Label(content, text="Fiducials").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=5)
         count_combo = ttk.Combobox(content, textvariable=count_var, values=("2", "3", "4"), state="readonly", width=6)
         count_combo.grid(row=0, column=1, sticky="w", pady=5)
-        ttk.Label(content, text="Set origin on the machine panel before calibration. Enter fiducial coordinates in mm.", wraplength=500).grid(
+        instructions = (
+            "Holder origin stays fixed. Enter original Gerber fiducial coordinates in mm; X is mirrored automatically. "
+            "Use the machine panel to center the head over each physical fiducial, then Save fiducial."
+            if self.gerber_mirrored else
+            "Keep the saved holder origin. Enter original Gerber fiducial coordinates in mm. "
+            "Go to each fiducial, align the head using the machine panel, then Save fiducial."
+        )
+        ttk.Label(content, text=instructions, wraplength=500).grid(
             row=1, column=0, columnspan=4, sticky="w", pady=(4, 10)
         )
         x_var, y_var = tk.StringVar(), tk.StringVar()
@@ -994,7 +1002,8 @@ class EngineRoomPage(Base):
         ttk.Entry(content, textvariable=x_var, width=12).grid(row=2, column=1, sticky="w", pady=5)
         ttk.Label(content, text="Y (mm)").grid(row=2, column=2, sticky="e", padx=4, pady=5)
         ttk.Entry(content, textvariable=y_var, width=12).grid(row=2, column=3, sticky="w", pady=5)
-        status_var = tk.StringVar(value="Enter fiducial 1 coordinates, then choose Go to fiducial.")
+        next_step = "center the head manually and Save fiducial" if self.gerber_mirrored else "choose Go to fiducial"
+        status_var = tk.StringVar(value="Enter fiducial 1 coordinates, then {}.".format(next_step))
         ttk.Label(content, textvariable=status_var, wraplength=500).grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 8))
         points = []
         state = {
@@ -1053,7 +1062,9 @@ class EngineRoomPage(Base):
             self._calibration_move_callback = completed
             self._emit("calibration_command", payload={"command": command, "settings": settings})
 
-        def go_to_fiducial():
+        def prepare_point():
+            if state["busy"]:
+                return None
             if not self.gerber_path:
                 messagebox.showerror("XY calibration", "Load a Gerber file before calibrating fiducials.", parent=dialog)
                 return
@@ -1066,6 +1077,9 @@ class EngineRoomPage(Base):
             except ValueError:
                 messagebox.showerror("XY calibration", "Enter valid X and Y coordinates for this fiducial.", parent=dialog)
                 return
+            settings = read_settings()
+            if settings is None:
+                return None
 
             if state["complete"] or state["count"] != count:
                 points.clear()
@@ -1079,12 +1093,25 @@ class EngineRoomPage(Base):
                     self._generate_gerber_program(self.gerber_path)
             # A retry replaces the active nominal point and discards later samples.
             del points[state["index"]:]
-            points.append({"x": x_mm, "y": y_mm})
+            source_x, source_y = mirror_gerber_point(x_mm, y_mm, mirror_x=self.gerber_mirrored)
+            points.append({"x": source_x, "y": source_y})
             state["point_ready"] = False
             self.xy_calibration_active = True
+            return source_x, source_y, count, settings
+
+        def go_to_fiducial():
+            prepared = prepare_point()
+            if prepared is None:
+                return
+            x_mm, y_mm, count, settings = prepared
             index = state["index"]
-            settings = read_settings()
-            if settings is None:
+            if self.gerber_mirrored:
+                # The flip's placement is unknown until the fiducials are
+                # measured. Do not move to an uncalibrated reflected position.
+                state["point_ready"] = True
+                status_var.set("Fiducial {} / {}: center the head manually, then Save fiducial. Holder origin stays fixed.".format(
+                    index + 1, count
+                ))
                 return
 
             status_var.set("Moving safely to fiducial {} / {} at X {:.3f}, Y {:.3f} mm…".format(index + 1, count, x_mm, y_mm))
@@ -1108,9 +1135,8 @@ class EngineRoomPage(Base):
                 command = "{}MA {:.3f}, {:.3f};".format(z_command, target_x, target_y)
                 dispatch(command, lambda _result: arrived(index, x_mm, y_mm), timeout=30.0)
 
-            # OC reports coordinates in the operator-set origin. OA reports
-            # raw microsteps from machine home, so it would add the board's
-            # distance from home to the fitted XY translation.
+            # Measure placement relative to holder zero. OA would add the
+            # holder's distance from machine home to the fitted translation.
             dispatch("OC; OZ;", move_after_position_read, timeout=5.0)
 
         def arrived(index, x_mm, y_mm):
@@ -1118,7 +1144,9 @@ class EngineRoomPage(Base):
             status_var.set("Fiducial {} / {}: use the machine panel to position XY over its center, then choose Save fiducial.".format(index + 1, state["count"]))
 
         def record_point():
-            if state["busy"] or not state["point_ready"] or state["index"] >= len(points):
+            if state["busy"] or state["complete"]:
+                return
+            if prepare_point() is None:
                 return
             status_var.set("Reading machine coordinates for fiducial {}…".format(state["index"] + 1))
 
@@ -1127,6 +1155,8 @@ class EngineRoomPage(Base):
                 try:
                     points[state["index"]]["machine_x"] = float(position.get("x", position.get("X")))
                     points[state["index"]]["machine_y"] = float(position.get("y", position.get("Y")))
+                    if not all(math.isfinite(points[state["index"]][key]) for key in ("machine_x", "machine_y")):
+                        raise ValueError
                 except (TypeError, ValueError):
                     status_var.set("XY position unavailable. Check the machine position readout and retry.")
                     return
@@ -1135,13 +1165,14 @@ class EngineRoomPage(Base):
                 if state["index"] < state["count"]:
                     x_var.set("")
                     y_var.set("")
-                    status_var.set("Fiducial saved. Enter fiducial {} / {} coordinates, then choose Go to fiducial.".format(
-                        state["index"] + 1, state["count"]
+                    status_var.set("Fiducial saved. Enter fiducial {} / {} coordinates, then {}.".format(
+                        state["index"] + 1, state["count"], next_step
                     ))
                     return
                 try:
                     transform = fit_fiducial_transform(points)
                 except ValueError as exc:
+                    state["index"] -= 1
                     status_var.set("Calibration could not be calculated: {}".format(exc))
                     return
                 self.xy_transform = transform
@@ -1170,7 +1201,7 @@ class EngineRoomPage(Base):
         buttons = ttk.Frame(content)
         buttons.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         for label, command in (
-            ("Go to fiducial", go_to_fiducial),
+            ("Locate fiducial manually" if self.gerber_mirrored else "Go to fiducial", go_to_fiducial),
             ("Save fiducial", record_point),
             ("Close", close_dialog),
         ):
@@ -2044,6 +2075,10 @@ class EngineRoomPage(Base):
             return False
         if self.simulation_mode:
             return True
+        if self.gerber_mirrored and self.xy_transform is None:
+            self.machine_status = "Measure mirrored fiducials"
+            self._render()
+            return False
         serial_error = get_serial_preflight_error(settings)
         if serial_error:
             self.machine_status = "Machine offline"
@@ -2068,7 +2103,13 @@ class EngineRoomPage(Base):
         return self._generate_gerber_program(self.gerber_path)
 
     def _toggle_gerber_mirror(self):
-        self.gerber_mirrored = bool(self._gerber_mirror_var.get())
+        mirrored = bool(self._gerber_mirror_var.get())
+        if mirrored == self.gerber_mirrored:
+            return
+        if self._xy_fiducial_dialog is not None:
+            self._close_xy_fiducial_calibration_dialog()
+        self.gerber_mirrored = mirrored
+        self.xy_transform = None
         if self.gerber_path:
             self._generate_gerber_program(self.gerber_path)
         else:

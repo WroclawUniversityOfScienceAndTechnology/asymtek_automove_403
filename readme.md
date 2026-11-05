@@ -58,6 +58,14 @@ Press `INIT` after connecting the machine. The app waits for a successful initia
 before sending the saved origin, then waits for the origin command to complete before showing `Initialized`.
 Opening a communication connection or pressing `HOME` does not send the origin. Origin controls require machine mode.
 
+For the bottom layer, enable **Mirror Gerber** and open **Machine > XY fiducial calibration**.
+The X reflection uses the fixed holder zero; the saved machine origin is unchanged.
+Enter the original Gerber X/Y coordinates of each known fiducial, manually center the head over
+its physical position on the flipped board, and choose **Save fiducial**. Two points determine
+the board's translation and rotation; the corrected program is regenerated in holder coordinates.
+Mirrored machine execution requires this calibration. Changing the mirror option clears the previous
+alignment so top-side measurements cannot be applied to the bottom side. Simulation remains available.
+
 ## Screen Resolution
 
 The application starts at `1280x720`, which is scaled down by one-third from the original `1920x1080` layout.
